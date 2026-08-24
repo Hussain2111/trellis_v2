@@ -1,0 +1,12 @@
+node_modules
+.next
+.env
+.env.local
+*.tsbuildinfo
+next-env.d.ts
+
+# Probe output. These contain real account data — never commit them.
+probe-*.json
+*-probe.json
+backup-*.sql
+backup-*.sql.gz

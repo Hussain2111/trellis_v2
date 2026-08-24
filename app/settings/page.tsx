@@ -1,0 +1,149 @@
+import { sql } from 'drizzle-orm';
+import { db } from '@/lib/db/client';
+import { env } from '@/lib/env';
+import { ALL_SCOPES, REQUIRED_SCOPES, SCOPE_PURPOSE } from '@/lib/graph/scopes';
+import { formatRiyadh } from '@/lib/time';
+import { Badge, Panel, PanelHeader } from '@/components/ui/primitives';
+
+export const dynamic = 'force-dynamic';
+
+/**
+ * The instrument panel, built in Stage 1 rather than last.
+ *
+ * It renders the RESOLVED environment the running function actually sees. On
+ * the previous build that turned out to be a more reliable way to confirm a
+ * Vercel variable change had taken effect than the Vercel dashboard itself —
+ * particularly once variables had been marked "Sensitive" and become
+ * write-only, making a failed save indistinguishable from a successful one.
+ *
+ * Values are reported as set/not set. Nothing here prints a secret.
+ */
+
+async function databaseStatus(): Promise<{ ok: boolean; detail: string; lastBeat: Date | null }> {
+  try {
+    const rows = await db().execute<{ at: Date | null }>(sql`select max(at) as at from heartbeats`);
+    const raw = rows[0]?.at ?? null;
+    return {
+      ok: true,
+      detail: 'connected',
+      // Raw sql aggregates arrive as strings — there is no column type for
+      // postgres-js to parse them against, and handing one to a date formatter
+      // throws. Coerce at the boundary.
+      lastBeat: raw == null ? null : raw instanceof Date ? raw : new Date(String(raw)),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      detail: error instanceof Error ? error.message : String(error),
+      lastBeat: null,
+    };
+  }
+}
+
+export default async function SettingsPage() {
+  const e = env();
+  const database = await databaseStatus();
+
+  const rows: { label: string; value: string; tone?: 'good' | 'bad' }[] = [
+    { label: 'Graph API version requested', value: e.GRAPH_API_VERSION },
+    { label: 'Environment', value: e.NODE_ENV },
+    { label: 'App URL', value: e.APP_URL ?? 'not set' },
+    { label: 'Instagram handle', value: e.IG_HANDLE ?? 'not set' },
+    { label: 'Instagram user id', value: e.IG_USER_ID ?? 'not set' },
+    {
+      label: 'Instagram token',
+      value: e.IG_ACCESS_TOKEN ? 'set' : 'not set',
+      tone: e.IG_ACCESS_TOKEN ? 'good' : 'bad',
+    },
+    {
+      label: 'Cron secret',
+      value: e.CRON_SECRET ? 'set' : 'not set',
+      tone: e.CRON_SECRET ? 'good' : 'bad',
+    },
+    { label: 'Primary model', value: e.MODEL_PRIMARY },
+    { label: 'Fallback model', value: e.MODEL_FALLBACK ?? 'not set' },
+    {
+      label: 'Model API key',
+      value: e.GOOGLE_GENERATIVE_AI_API_KEY ? 'set' : 'not set',
+      tone: e.GOOGLE_GENERATIVE_AI_API_KEY ? 'good' : 'bad',
+    },
+  ];
+
+  return (
+    <main className="space-y-8">
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+        <p className="mt-1 text-sm text-[--color-ink-muted]">
+          What this deployment actually resolved — not what a dashboard says it should have.
+        </p>
+      </header>
+
+      <Panel>
+        <PanelHeader
+          title="Database"
+          aside={<Badge tone={database.ok ? 'good' : 'bad'}>{database.ok ? 'ok' : 'error'}</Badge>}
+        />
+        <dl className="divide-y divide-[--color-rule]">
+          <Row label="Connection" value={database.detail} />
+          <Row
+            label="Last keepalive write"
+            value={database.lastBeat ? formatRiyadh(database.lastBeat) : 'never'}
+          />
+        </dl>
+      </Panel>
+
+      <Panel>
+        <PanelHeader title="Configuration" />
+        <dl className="divide-y divide-[--color-rule]">
+          {rows.map((row) => (
+            <Row key={row.label} label={row.label} value={row.value} tone={row.tone} />
+          ))}
+        </dl>
+      </Panel>
+
+      <Panel>
+        <PanelHeader
+          title="Token scopes"
+          aside={`${REQUIRED_SCOPES.length} required · ${ALL_SCOPES.length} requested`}
+        />
+        <div className="px-5 py-3 text-xs text-[--color-ink-faint]">
+          Live scope checking arrives with the Graph client. Until then this is the list a token
+          must be generated with — <span className="font-mono">business_management</span> included,
+          whose absence returns an empty Page list rather than an error.
+        </div>
+        <dl className="divide-y divide-[--color-rule]">
+          {ALL_SCOPES.map((scope) => (
+            <Row key={scope} label={scope} value={SCOPE_PURPOSE[scope] ?? ''} mono />
+          ))}
+        </dl>
+      </Panel>
+    </main>
+  );
+}
+
+function Row({
+  label,
+  value,
+  tone,
+  mono,
+}: {
+  label: string;
+  value: string;
+  tone?: 'good' | 'bad';
+  mono?: boolean;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 px-5 py-3">
+      <dt className={`text-sm text-[--color-ink-muted] ${mono ? 'font-mono text-xs' : ''}`}>
+        {label}
+      </dt>
+      <dd
+        className={`text-right text-sm ${
+          tone === 'bad' ? 'text-[--color-negative]' : 'text-[--color-ink]'
+        }`}
+      >
+        {value}
+      </dd>
+    </div>
+  );
+}

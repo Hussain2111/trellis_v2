@@ -1,0 +1,82 @@
+@import 'tailwindcss';
+
+/**
+ * Design tokens (Foundation A6).
+ *
+ * The user is an Instagram creator, not an engineer. They spend their working
+ * day inside Instagram, and that is the aesthetic baseline this is judged
+ * against — visual and spacious, never a dense admin table.
+ *
+ * Warm paper rather than clinical white, because the signature element is a
+ * note stuck to a wall.
+ */
+@theme {
+  --color-paper: oklch(98.5% 0.008 85);
+  --color-paper-sunk: oklch(96% 0.012 85);
+  --color-card: oklch(100% 0 0);
+
+  --color-ink: oklch(25% 0.015 60);
+  --color-ink-muted: oklch(48% 0.012 60);
+  --color-ink-faint: oklch(65% 0.01 60);
+  --color-rule: oklch(90% 0.008 70);
+
+  --color-accent: oklch(58% 0.14 25);
+  --color-accent-soft: oklch(94% 0.03 30);
+
+  --color-positive: oklch(52% 0.11 150);
+  --color-negative: oklch(55% 0.16 25);
+
+  /* Sticky notes. Restrained physicality — paper texture and curled corners
+     fight legibility at phone width, which is where this is most often read. */
+  --color-note-1: oklch(94% 0.055 95);
+  --color-note-2: oklch(93% 0.05 155);
+  --color-note-3: oklch(93% 0.05 250);
+  --color-note-4: oklch(93% 0.055 20);
+  --color-note-5: oklch(93% 0.05 310);
+  --color-note-6: oklch(94% 0.05 60);
+
+  --radius-note: 0.375rem;
+  --shadow-note: 0 1px 2px oklch(0% 0 0 / 0.06), 0 6px 16px oklch(0% 0 0 / 0.08);
+  --shadow-lift: 0 2px 4px oklch(0% 0 0 / 0.08), 0 12px 28px oklch(0% 0 0 / 0.12);
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+}
+
+/* The viewer's theme has three states: an explicit choice, or system default.
+   Every colour is defined here first so nothing depends on a media query. */
+:root {
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --color-paper: oklch(21% 0.012 70);
+    --color-paper-sunk: oklch(18% 0.012 70);
+    --color-card: oklch(25% 0.012 70);
+    --color-ink: oklch(94% 0.008 80);
+    --color-ink-muted: oklch(72% 0.01 75);
+    --color-ink-faint: oklch(55% 0.01 75);
+    --color-rule: oklch(32% 0.01 70);
+    --color-accent: oklch(72% 0.13 30);
+    --color-accent-soft: oklch(32% 0.05 30);
+    --color-note-1: oklch(40% 0.05 95);
+    --color-note-2: oklch(39% 0.045 155);
+    --color-note-3: oklch(39% 0.045 250);
+    --color-note-4: oklch(39% 0.05 20);
+    --color-note-5: oklch(39% 0.045 310);
+    --color-note-6: oklch(40% 0.045 60);
+  }
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Statistics line up. Prose does not. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}

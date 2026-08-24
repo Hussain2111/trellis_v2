@@ -1,0 +1,55 @@
+name: Backup
+
+# One table in this system cannot be re-fetched: account_daily. Posts,
+# comments and per-post insights all come back from Meta on request, but the
+# daily follower series is built one row at a time by a cron and Meta does not
+# serve it retroactively. Lose the database after six months and six months of
+# follower history is gone permanently.
+#
+# Supabase Free has no automated backups, so this workflow is the entire
+# disaster-recovery story.
+#
+# Needs: repository SECRET DATABASE_URL — the pooler connection string.
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch: {}
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Install a matching pg_dump
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client-16
+
+      - name: Dump
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "DATABASE_URL secret is not set."
+            exit 1
+          fi
+          pg_dump --no-owner --no-privileges "$DATABASE_URL" | gzip > backup.sql.gz
+
+      - name: Refuse to upload a useless artifact
+        run: |
+          size=$(stat -c%s backup.sql.gz)
+          echo "dump is ${size} bytes"
+          # A backup that silently stopped working is worse than none, because
+          # it is believed. An empty or near-empty dump fails the run.
+          if [ "$size" -lt 1024 ]; then
+            echo "Dump is implausibly small — failing rather than uploading it."
+            exit 1
+          fi
+          gzip -t backup.sql.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trellis-backup-${{ github.run_id }}
+          path: backup.sql.gz
+          retention-days: 90
