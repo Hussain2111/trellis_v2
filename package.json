@@ -15,7 +15,10 @@
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "probe:graph": "tsx scripts/probe/graph.ts",
+    "probe:lookback": "tsx scripts/probe/insights-lookback.ts",
+    "probe:account-insights": "tsx scripts/probe/account-insights.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.50",
