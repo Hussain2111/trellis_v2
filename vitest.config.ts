@@ -3,5 +3,25 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts'],
+    /**
+     * Load `.env` before any test imports `lib/env.ts`.
+     *
+     * Without this, `DATABASE_URL` falls through to the schema default in
+     * lib/env.ts and the DB-backed tests silently run against whatever
+     * database happens to be at that address — which, on a machine that has
+     * ever run a different project, is a real database with a real schema that
+     * is not this one. The failure mode is tests that pass or fail for reasons
+     * having nothing to do with the code under test.
+     *
+     * dotenv does not override variables already set, so CI keeps the
+     * DATABASE_URL it exports and only local runs read the file.
+     */
+    setupFiles: ['dotenv/config'],
+    /**
+     * Several test files share one real database — there is no per-file
+     * sandbox — so parallel files let one file's cleanup race another's
+     * assertions.
+     */
+    fileParallelism: false,
   },
 });

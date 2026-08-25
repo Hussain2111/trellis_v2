@@ -12,15 +12,24 @@ The outcome this plan is aimed at: a deployed skeleton meeting real infrastructu
 
 ## Where this actually is
 
-> **Keep this section current as work finishes, not as errors are noticed.** It has now been stale three times in two days, each time describing a world that had moved on — a repository that had been created, a stage that had been built, a token that had been regenerated. A roadmap that overstates what is left is as misleading as one that understates it, and the cost lands on whoever reads it next. Updating it is part of finishing a task, not a separate chore.
+> **Keep this section current as work finishes, not as errors are noticed.** It has been stale four times in three days. The reason is structural rather than careless: **this section has two authors.** Code work is known the moment it lands; infrastructure work — a project created, a migration run, a deploy finished, a token regenerated — happens in dashboards nobody here can see, and only enters the document when someone says so. So the rule cuts both ways: the agent updates it on finishing a task, and infrastructure outcomes get reported rather than assumed. A roadmap that overstates what is left misleads exactly as much as one that understates it.
 
 **Stage 0 — done.** `Hussain2111/trellis_v2` exists and carries the work. The old repository was never touched.
 
-**Stage 1 — partly done.** Built and locally verified: the app, CI against a real Postgres container, migrations through a script, the keepalive write, cron auth (401/401/200 against a production build), the three-item nav, and `/settings` rendering resolved environment values. The **Supabase project exists** — the v1 project reused, dumped, `public` wiped, password reset — with its pooler string in `.env`. **Outstanding: run the migration against it, and deploy to Vercel.** Until the deploy exists, the scheduler has only been proven against `localhost`, which is a materially weaker claim than proving it against a domain.
+**Stage 1 — DONE. First real-infrastructure contact achieved**, which is the milestone this entire plan is organised around.
 
-**Stage 2 — probes written and run**, against a freshly regenerated seven-scope token with 56 days left. Q1 and Q2 answered, Q3 half-answered because the probe omitted a required parameter. Tasks 2.6 and 2.7 are the remainder, and 2.6 is the last thing blocking the schema.
+- The app, CI against a real Postgres container, migrations through a script, the keepalive write, cron auth, three-item nav, `/settings`.
+- **Supabase**: v1 project reused, dumped, `public` wiped, password reset. `npm run db:migrate` ran — `migrations applied`, both tables confirmed.
+- **Vercel**: deployed at `trellisv2-rho.vercel.app`. `/settings` renders resolved values from the running function.
+- **Scheduler**: green against the live domain, not `localhost`. Tasks 1.2, 1.3 and 1.4 all close.
 
-**Stage 3 — one foundation piece landed early** (the provider interface, plus the validator and the time module from Stage 1), because nothing gated them. The data model waits on 2.6.
+**Vercel environment is complete:** `IG_ACCESS_TOKEN` and `APP_URL` are set and redeployed. Confirm on `/settings` that the Instagram token reads _set_ rather than _not set_ — the page reports what the running function resolved, and a value that did not survive the redeploy shows up there and nowhere else.
+
+**The keepalive has not fired yet.** `/settings` reads `never`, which is expected: Vercel cron runs daily and the first run had not come round. Once it flips to a timestamp, Supabase cannot pause.
+
+**Stage 2 — probes written and run three times**, against a freshly regenerated seven-scope token with 56 days left. `docs/graph-api.md` is written and pushed (Task 2.8), with explicit `_pending_` blanks where answers are still missing rather than plausible guesses. **Q1, Q2 and Q3a are answered.** Two things remain and neither blocks the schema: **Q3b**, where the probe conflated a range cap with a history horizon and discarded the error text that probably settles it (Task 2.9), and **Q2a**, which needs seven days of elapsed time (Task 2.10).
+
+**Stage 3 — unblocked, and partly built.** The provider interface, the validator and the time module landed early because nothing gated them. **Task 3.1, the data model, can now be written**: `account_daily` holds all six metrics and the provisional `account_windows` is deleted.
 
 **Not started:** Stages 4, 5, 6.
 
@@ -62,23 +71,73 @@ Four things follow, and none is small:
  {"dimension_values":["NON_FOLLOWER"],"value":61}]
 ```
 
-The dimension keys are `FOLLOWER` and `NON_FOLLOWER` — **not** `FOLLOW` and `UNFOLLOW`. Reading the first as follows and the second as unfollows is plausible; it is equally plausible that the breakdown describes the actor's relationship at the time of the event. Getting it backwards would put a confidently inverted number on the dashboard under the label "unfollows" — exactly the failure the blank-not-zero discipline exists to prevent.
+The dimension keys are `FOLLOWER` and `NON_FOLLOWER` — **not** `FOLLOW` and `UNFOLLOW`. Getting it backwards would put a confidently inverted number on the dashboard under the label "unfollows" — exactly the failure the blank-not-zero discipline exists to prevent.
 
-**Verify before labelling anything.** See Task 2.7.
+### Q2a — the probe compared against the wrong quantity
 
-### Q3 — HALF-RESOLVED. The probe had a bug that hid the rest.
-
-Four of five metrics errored identically:
+It reported _"signs DISAGREE → the mapping is REVERSED, or the dimensions mean something else."_ It is the second, and there is a reading that fits the numbers exactly.
 
 ```
-(#100) The following metrics (views) should be specified with parameter metric_type=total_value
+FOLLOWER          35
+NON_FOLLOWER      57
+follower_count:   first 0, last 0, sum 35, last − first 0
 ```
 
-`views`, `profile_views`, `accounts_engaged` and `total_interactions` all require `metric_type=total_value`, and the probe did not send it. **So Q3 was only actually tested for `reach`.** This is a client-level finding, not merely a probe fix — the sync layer needs that parameter too.
+**`follower_count` is not a running total.** The account holds ~4,872 followers; a running total would read ~4,872 at both ends. It reads 0 and 0. So the `last − first` branch was never applicable, and its `INCONCLUSIVE` verdict is an artefact of running an inapplicable test at all.
 
-Established: **`reach` backfills** (a 30-day window returned 30 days) and **`follower_count` backfills** (30 days returned). Note the metric is `follower_count`, **singular** — distinct from the account field `followers_count`. Two names for closely related things; the schema must not blur them.
+**`sum(follower_count)` is 35. `FOLLOWER` is 35.** Not a near-miss to be explained by window drift — an identity.
 
-**The unresolved half is a shape question, and it decides a table.** `metric_type=total_value` typically returns _one aggregate for the requested window_, not a per-day series. If those four metrics only support that, there is no daily series for them at all, and per-day values would mean **one request per day** — 30 for a month, 365 for a year. Affordable at the observed usage, but a different operation from the single windowed call `reach` supports. See Task 2.6.
+**The hypothesis:** `follower_count` is **gross new followers per day** — not net change, not a running total. `[REPO-CONFIRMED]` `verifyMapping` tests only the delta and running-total hypotheses and has **no branch for this third one**, so it compared a _gross follows_ figure against a _net change_ difference and concluded "reversed".
+
+Under the gross reading everything reconciles: 35 follows, 57 unfollows, net −22 — consistent with the account moving 4,881 → 4,872 across the two probe runs. **The mapping is probably the intuitive one after all.**
+
+**But the identity is weaker evidence than it looks, and this is the part to be careful about.** If `follower_count` really is gross new follows, then `sum(follower_count) == FOLLOWER` may be near-**tautological** — two Meta figures derived from the same underlying counter, agreeing because they are the same number twice. Consistency between two views of one source is not independent confirmation.
+
+**The genuinely independent check** compares against a different edge entirely:
+
+1. Record `accounts.followers_count` — the _profile field_ — today, and again in seven days.
+2. Over that same window request `follows_and_unfollows` with `breakdown=follow_type`, and `follower_count` as a series.
+3. Both predictions must hold: `sum(follower_count)` equals `FOLLOWER` again, **and** `FOLLOWER − NON_FOLLOWER` equals the observed change in `followers_count`.
+
+**Judge the second on sign and rough magnitude, not exactness.** The profile count also moves for reasons this metric never sees — deactivated accounts, spam removals by Meta — so a few units of mismatch is not falsification.
+
+**Until both hold, the dashboard does not label these.** A coincidence at n=1 is still a coincidence.
+
+### Q3a — RESOLVED. `account_windows` is not needed.
+
+**All six metrics yield a usable daily value from a one-day window.** `account_daily` holds every one of them, keyed by day, exactly as first drawn. **The provisional `account_windows` table is deleted.** The schema is unblocked.
+
+But the _cost_ of a daily value differs sharply, and the sync layer has to know it:
+
+| Metric               | Shape                     | Requests for N days     | Stability                                               |
+| -------------------- | ------------------------- | ----------------------- | ------------------------------------------------------- |
+| `reach`              | `period=day` → **series** | **1** per 30-day window | stable                                                  |
+| `follower_count`     | `period=day` → **series** | **1** per 30-day window | stable                                                  |
+| `views`              | `total_value` only        | **N** — one per day     | renamed and redefined by Meta within the last two years |
+| `profile_views`      | `total_value` only        | **N**                   | —                                                       |
+| `accounts_engaged`   | `total_value` only        | **N**                   | Meta's own description: _estimated and in development_  |
+| `total_interactions` | `total_value` only        | **N**                   | Meta's own description: _estimated and in development_  |
+
+**`metric_type=total_value` is per-metric, not blanket.** `[VERIFIED-LIVE]` `follower_count` **rejects** it with `(#100)`. So it is both _required_ by some metrics and _refused_ by others — a client that applies it uniformly breaks in the other direction.
+
+**The stable metrics are the cheap ones.** That alignment is not a coincidence: the metrics Meta has kept stable are the ones served as proper daily series. It is also why the backfill policy below is clearly right rather than merely a reasonable compromise — a 2023 `accounts_engaged` and a 2026 one may not mean the same thing, so filling five years of them would buy a series **the chat should refuse to trend end to end anyway**.
+
+A 30-day fill costs `2 + (4 × 30) = 122` requests. Affordable at the measured ~1% headroom, but not the two-request operation an earlier draft implied. The daily sync only ever fills one day, so this is a backfill concern and not a steady-state one.
+
+### Q3b — the earlier reading was wrong, and the probe threw away the evidence
+
+The probe concluded _"the largest window still returning values is how much history the first sync can populate."_ **That conflates two different things.**
+
+Meta caps the `since`/`until` **range per request** at 30 days for account insights. A 90-day request erroring is consistent with hitting that cap and says nothing about whether 90-day-old data exists. `[REPO-CONFIRMED]` every window the probe tested was built by `windowParams(days)`, which always ends at `now` — **so a range cap and a history horizon produce byte-identical output.** They were never distinguished.
+
+**Worse, the answer was probably in hand and discarded.** `[REPO-CONFIRMED]` `probeRange` pushes only `outcome.shape` into its table and never `outcome.detail`, so `90d:error` printed with no message. The `(#100)` text elsewhere in the same run is exactly what identified the `metric_type` requirement; whatever Meta said about the 90-day request went in the bin.
+
+**The discriminating test is one request:** a 30-day window entirely in the past — `since` = 60 days ago, `until` = 31 days ago.
+
+- **Returns values** → 30 days is a per-request cap, not a boundary. History goes deeper, the backfill pages backwards, and its scope grows.
+- **Returns empty** → 30 days really is the horizon and the current reading stands.
+
+Then walk back — 90→61, 180→151, 365→336 — to find where it actually stops.
 
 ### Rate limits are generous. Keep the guard anyway.
 
@@ -143,11 +202,10 @@ Specified before any surface. Three features planned on three different undernea
 
 ### Measurement
 
-| Table                                          | Key columns                                                                                                                                                                                                       | Notes                                                                                                                                                                                                                                                                                                                                                           |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `post_insights`                                | `post_id`, `checkpoint` (`t24`\|`t48`\|`t7d`\|`latest`), `captured_at`, `reach`, `views`, `saved`, `shares`, `likes`, `comments`, `total_interactions`, `unavailable` jsonb — unique on (`post_id`, `checkpoint`) | Meta serves cumulative lifetime totals with no historical curve, so **a curve only exists if it was sampled**. This table is the sampling record. `unavailable` names _why_ a metric is missing, so a blank can explain itself.                                                                                                                                 |
-| `account_daily`                                | `account_id`, `day` (text `YYYY-MM-DD`, Riyadh), `follower_count`, `reach`, `unavailable` jsonb — unique on (`account_id`, `day`)                                                                                 | **Confirmed per-day series only.** `reach` and `follower_count` both returned 30 days against an explicit window. `day` as text, not date, so the Riyadh boundary is decided once at write time.                                                                                                                                                                |
-| `account_windows` — **shape pending Task 2.6** | `account_id`, `window_start`, `window_end`, `views`, `profile_views`, `accounts_engaged`, `total_interactions`, `follows`, `unfollows`                                                                            | Provisional. `metric_type=total_value` may return one aggregate per window rather than a series, in which case these four metrics cannot live in `account_daily` at all. If Task 2.6 shows a one-day window yields a usable daily value, they fold back into `account_daily` and this table does not exist. **Do not write either version before 2.6 returns.** |
+| Table           | Key columns                                                                                                                                                                                                                   | Notes                                                                                                                                                                                                                                                                |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `post_insights` | `post_id`, `checkpoint` (`t24`\|`t48`\|`t7d`\|`latest`), `captured_at`, `reach`, `views`, `saved`, `shares`, `likes`, `comments`, `total_interactions`, `unavailable` jsonb — unique on (`post_id`, `checkpoint`)             | Meta serves cumulative lifetime totals with no historical curve, so **a curve only exists if it was sampled**. This table is the sampling record. `unavailable` names _why_ a metric is missing, so a blank can explain itself.                                      |
+| `account_daily` | `account_id`, `day` (text `YYYY-MM-DD`, Riyadh), `follower_count`, `reach`, `views`, `profile_views`, `accounts_engaged`, `total_interactions`, `follows`, `unfollows`, `unavailable` jsonb — unique on (`account_id`, `day`) | **Holds all six**, confirmed: every metric yields a usable daily value from a one-day window. `day` as text, not date, so the Riyadh boundary is decided once at write time. `follows`/`unfollows` stay **unlabelled in the UI** until Q2a's seven-day check passes. |
 
 ### Product
 
@@ -172,7 +230,25 @@ Specified before any surface. Three features planned on three different undernea
 
 **The two shapes of `post_insights`, permanently.** Historical posts get exactly one row, at `checkpoint = 'latest'` — excellent for medians, baselines, format comparison and ranking. Posts published after go-live get a real curve. **`t24`/`t48`/`t7d` can never exist for a 2021 post**, because producing one would have required sampling at that age. Absence of `t24` must read as _not sampled_, distinct from zero and distinct from _too new_.
 
-**Blockers.** `account_daily` / `account_windows` shape depends on **Task 2.6**. Everything else is unblocked — Q1 and Q2 are answered.
+### Two rules the storage layer is easy to violate
+
+**No `default 0`. Anywhere.** Eight nullable metric columns on `account_daily` is precisely the shape where a helpful default slips in, and a zero written at the storage layer is unrecoverable downstream — nothing can later distinguish it from a real measurement of zero. Every metric column is nullable with no default, and the migration is read for this specifically before it is applied.
+
+**The `unavailable` reason vocabulary is a closed set, defined once.** Free-text strings written wherever they happen to occur cannot be rendered differently by the UI, and the distinction the whole plan rests on dissolves into prose. A shared union type — used by the sync layer, the backfill and both surfaces:
+
+| Reason                    | Means                                                                    | Renders as                             |
+| ------------------------- | ------------------------------------------------------------------------ | -------------------------------------- |
+| `declined_by_meta`        | Meta returned an error, or omitted the metric from a successful response | "Instagram didn't report this"         |
+| `not_backfilled`          | Older than `BACKFILL_EXPENSIVE_DAYS`; never requested                    | "Not collected for this period"        |
+| `transient_after_retries` | Error code `1` or similar, retried with backoff and still failed         | "Couldn't be fetched — may work later" |
+| `not_applicable`          | The metric does not exist for this media type                            | "Doesn't apply to this kind of post"   |
+| `never_sampled`           | A checkpoint that would have required measuring at an age already passed | "Not measured at this point"           |
+
+`never_sampled` is the load-bearing one: it is what `t24`/`t48`/`t7d` carry for every post published before the app existed, and **it is what the chat's acceptance test turns on.** It must never be collapsed into `declined_by_meta` — Meta did not decline anything; nobody asked at the time.
+
+**`unavailable` carries a reason, and the reasons are not interchangeable.** A day older than the backfill's expensive-metric window holds `reach` and `follower_count` but not the other four, and that gap must read **"not backfilled — outside the 90-day window"**, never "unavailable from Meta". Those are different claims and only one of them is true. The honesty rule is not just blank-instead-of-zero; it is _blank with the correct reason_.
+
+**Blockers: none.** Q3a is answered — `account_daily` holds all six and `account_windows` is deleted. Q3b affects only how far back the backfill reaches, not the shape of the table. **The schema can be written now.**
 
 ## A2 — Sync layer
 
@@ -188,17 +264,28 @@ Specified before any surface. Three features planned on three different undernea
 | `comments`      | Comments for the most recent N posts                                                                                                                                                                                      | Daily                                  |
 | `backfill`      | One-time historical pass over all 243 posts, `latest` only                                                                                                                                                                | **Runs once**, see below               |
 
-**`metric_type=total_value` is required** for `views`, `profile_views`, `accounts_engaged` and `total_interactions`. Without it the request errors `(#100)` rather than returning partial data. `reach` does not need it. This is written down in `docs/graph-api.md` and enforced in the client, not remembered.
+**`metric_type=total_value` is per-metric, in both directions.** `views`, `profile_views`, `accounts_engaged` and `total_interactions` **require** it — without it the request errors `(#100)` rather than returning partial data. `follower_count` **rejects** it with the same error code. `reach` neither needs nor minds it. A client that applies the parameter uniformly breaks four metrics or one, depending which way it guesses. This lives in `docs/graph-api.md` and is enforced in the client, not remembered.
+
+**Request cost is not uniform either.** `reach` and `follower_count` come back as a **series** — one request covers a 30-day window. The other four are **one request per day**. A 30-day fill is `2 + (4 × 30) = 122` requests. The daily sync only ever fills one day, so this asymmetry is a backfill concern rather than a steady-state one.
 
 ### The backfill — the largest single operation in the project
 
-243 posts, one insights request each. The lookback probe took 4m53s to walk it at a deliberately unhurried pace, and that is roughly the right pace.
+Two halves: per-post insights for 243 posts, and account-daily history.
+
+**Per-post half.** 243 posts, one insights request each. The lookback probe took 4m53s at a deliberately unhurried pace, which is roughly the right pace.
 
 - **It runs once.** Guarded by a flag, or by checking whether `post_insights` is empty. A backfill that re-runs is a rate-limit incident waiting for a redeploy.
-- **`latest` only.** It cannot produce `t24`/`t48`/`t7d` for a historical post, because that would have required sampling at that age. Attempting to synthesise one from a lifetime total would be inventing a measurement.
-- **Same resumable cursor and per-run budget as the daily sync.** The Actions loop calls until done, across as many invocations as it takes.
-- **Deliberately throttled.** There is no reason to rush a one-time operation, and this is exactly where a rate limit would bite.
-- **Retry Meta error code `1` two or three times with backoff before writing `unavailable`.** Code 1 is their generic _transient_ error. The single failing post in the probe is likely recoverable, making it 243/243.
+- **`latest` only.** It cannot produce `t24`/`t48`/`t7d` for a historical post, because that would have required sampling at that age. Synthesising one from a lifetime total would be inventing a measurement.
+- **Retry Meta error code `1` two or three times with backoff before writing `unavailable`.** Code 1 is Meta's generic _transient_ error. The single failing post in the probe is likely recoverable, making it 243/243.
+
+**Account-daily half — `reach` and `follower_count` deep, the other four recent.** `[DECISION]`
+
+- `reach` and `follower_count` are backfilled as far as **Q3b** allows, paging backwards in 30-day windows. They are cheap — one request per window — and they are the **stable** metrics.
+- `views`, `profile_views`, `accounts_engaged` and `total_interactions` are filled for **`BACKFILL_EXPENSIVE_DAYS`, default 90** — a named constant in one place, with the reasoning beside it, not a number buried in a loop.
+- **The reasoning is about meaning, not only cost.** `views` was renamed and redefined by Meta within the last two years, and Meta's own descriptions mark `accounts_engaged` and `total_interactions` as _estimated and in development_. A 2023 value and a 2026 value may not denote the same thing, so filling five years would buy a series **the chat must refuse to trend end to end anyway**. That the unstable metrics are also the expensive ones is a convenient alignment: the metrics Meta kept stable are the ones served as proper daily series.
+- **Resumable at the metric level, not just the day level.** Before requesting, check `account_daily` for an existing non-null value for that metric on that day. Extending the depth later then fills only the gap instead of re-requesting everything — and the same check is what makes the whole operation idempotent, which is required regardless.
+
+**Both halves share the resumable cursor and per-run budget**, are deliberately throttled, and return `{done: false}` to be called again. There is no reason to rush a one-time operation, and this is exactly where a rate limit would bite.
 
 **Partial failure is the design centre, not an edge case:**
 
@@ -227,7 +314,7 @@ Required in the client and the runner, not bolted on later:
 - **A deliberately throttled first sync.** The initial full walk runs slower than steady-state syncing on purpose.
 
 **Resources.** `docs/graph-api.md` (written from probe output, not from Meta's docs). Pinned API version from a single env-driven constant, surfaced on the settings page.
-**Blockers.** Task 2.6 (the `account_daily` / `account_windows` shape) and Task 2.7 (the follows/unfollows mapping). Q1 is answered.
+**Blockers: none for the shape.** Task 2.9 sets how deep `reach` and `follower_count` backfill; Task 2.10 decides whether `follows`/`unfollows` can be labelled. Neither gates writing this layer.
 
 ## A3 — Scheduling layer
 
@@ -258,7 +345,7 @@ Posts, comments and per-post insights can be re-fetched from Meta at any time �
 
 **`account_daily` is the exception, and Q3 softened this without removing it.** `reach` and `follower_count` do backfill across at least a 30-day window, so a lost database is recoverable to a 30-day depth rather than to nothing. **Thirty days of recoverable history is not a disaster-recovery plan.** Beyond that rolling window the series is still built one row per day by a cron and still gone for good, and Supabase Free still has no automated backups.
 
-So `backup.yml` ships before the sync writes, unchanged. If Task 2.6 shows the window reaches 90 or 365 days, the depth improves again — and the argument does not change, because the series only ever grows past whatever that window turns out to be.
+So `backup.yml` ships before the sync writes, unchanged. If Task 2.9 shows 30 days is a per-request cap rather than a horizon, the recoverable depth improves — and the argument does not change, because the series only ever grows past whatever that depth turns out to be.
 
 `backup.yml` runs weekly against the pooler connection string, dumps to a compressed file, and uploads it as a workflow artifact with the longest retention available. A dump that comes back empty or implausibly small **fails the workflow loudly** rather than uploading a useless artifact — a backup that silently stopped working is worse than none, because it is believed.
 
@@ -351,6 +438,14 @@ It must **answer the first half** — from 243 posts of real history, every figu
 - _"How has my carousel-vs-reel saves gap changed over the last two years?"_ — multi-step composition across the full history.
 - _"What do my ten best-reaching posts have in common that my ten worst don't?"_ — the closest thing to what a creator actually wants, and impossible to score. Worth seeing what it does.
 
+### Two metrics the chat must not trend across long spans
+
+`views` was renamed and redefined by Meta within the last two years, and Meta's own descriptions mark `accounts_engaged` and `total_interactions` as _estimated and in development_. A 2023 value and a 2026 value may not denote the same thing.
+
+So a tool returning any of those four carries an explicit **comparability window**, and the chat declines to trend them beyond it — the same refusal shape as an unmet sample floor, for a different reason. `reach` and `follower_count` are the stable ones and may be trended freely. This is also why they are the ones backfilled deep.
+
+Stating a figure is fine. Drawing a line through five years of a metric whose definition moved is not.
+
 ### Format comparison is a normal path, not an exception
 
 The earlier "this account posts one format" finding was an artefact of a ten-post sample. Across 243 there are substantial samples of images, reels and carousels, so `getFormatBreakdown` clears its floors comfortably.
@@ -409,7 +504,7 @@ Model deprecation is the recurring failure — providers delete models that runn
 
 **Top half — 4 to 6 sticky notes.** Each an _opportunity_, not a metric readout. Generated on a schedule and cached; **never on page load**. Each cites the posts it derives from. **When the data won't support six, show four. Never fill the grid.**
 
-**Bottom half — account metrics only.** Per decision 3, reconfirmed after review: follower count over time, day-over-day change, gross follows/unfollows if **Q2** permits, and account-level reach/views/profile-views.
+**Bottom half — account metrics only.** Per decision 3, reconfirmed after review: follower count over time, day-over-day change, account-level reach and views, and gross follows/unfollows **only once Q2a confirms what the dimensions mean**. Until then the figures are stored and shown unlabelled, or not shown — never labelled on a guess.
 
 **No post-performance readout, and the lower half reserves room for one anyway.**
 
@@ -541,34 +636,34 @@ Stage → task → steps. No timelines.
 - `Hussain2111/trellis_v2` exists, is attached to the working session, and carries the Stage 1 and Stage 2 commits. The old repository was never touched.
 - Notes, kept because it will recur: repository creation, renaming and visibility changes return `403 Resource not accessible by integration` from a session scoped to one repository's contents. Those are account-level actions and stay with the owner.
 
-## Stage 1 — Walking skeleton, in production — **PARTLY DONE**
+## Stage 1 — Walking skeleton, in production ✅ **DONE**
 
 Deploy to real infrastructure before any feature exists. Every genuine infrastructure bug in the last build surfaced within hours of first contact and **none were reachable from local tests or CI**.
 
-**Built and verified locally: 1.1, 1.4, 1.5.** The Supabase project also exists (1.2), reused from v1 and cleaned. **Outstanding: one migration command, and the Vercel deploy** — the deploy being exactly the "real infrastructure" half this stage exists for. Until it lands, the scheduler has been proven against `localhost` and not against a domain, which is a materially weaker claim.
+**All five tasks close.** The app is deployed at `trellisv2-rho.vercel.app`, migrations have run against the real Supabase project, and the scheduler has been proven **against the live domain**. Every genuine infrastructure bug in the previous build surfaced within hours of this moment; the difference is that this time it happens with almost nothing built on top.
 
 **Task 1.1 — Repository and CI** ✅ **DONE**
 
 - Steps: new **private** repo; Next app; ESLint/Prettier; CI running typecheck, lint, format, migrations and tests **against a real Postgres service container**.
 - Notes: real Postgres in CI caught driver-level bugs last time that no mock would have. Private is the deliberate choice (decision 2) — 2,000 free Actions minutes covers four light workflows several times over, so there is nothing to buy by publishing the source.
 
-**Task 1.2 — Supabase** ⚠️ **NEARLY DONE — one command left**
+**Task 1.2 — Supabase** ✅ **DONE**
 
 - **The project already exists.** The v1 project was reused, not replaced: dumped, `public` wiped, password reset. The pooler `DATABASE_URL` is in `.env`. **Do not create a second project.**
 - Done: pooler string (transaction mode), prepared statements disabled in `lib/db/client.ts`, the migration script, and the Stage 1 tables.
-- **Outstanding: run `npm run db:migrate` against the cleaned project.** That is the whole of what is left here.
+- `npm run db:migrate` ran against it — `migrations applied`, `accounts` and `heartbeats` both confirmed.
 - Notes: pooler, not direct — serverless functions are short-lived and numerous. The direct hostname is IPv6-only on new projects and unreachable from some networks; a connection that hangs with no error is this.
 - Blocker: migrations run through the script, never pasted into the SQL editor — the editor autocommits per statement, so a guard aborting a destructive step raises _after_ the destruction committed.
 
-**Task 1.3 — Deploy to Vercel** ⛔ **OUTSTANDING — owner**
+**Task 1.3 — Deploy to Vercel** ✅ **DONE** — live at `trellisv2-rho.vercel.app`, with `IG_ACCESS_TOKEN` and `APP_URL` set and redeployed.
 
 - Steps: import `trellis_v2`; set env vars **with all three environments ticked** and **not marked Sensitive**; deploy; **turn Deployment Protection off**; redeploy.
 - Notes: Sensitive makes a variable write-only, so a failed save is indistinguishable from a successful one — the previous build is still stuck with unreadable values. Environment changes need a redeploy. Deployment Protection is on by default and 401s every webhook and scheduler; it can return if the project is recreated.
 
-**Task 1.4 — Scheduler, end to end** ⚠️ **BUILT, NOT PROVEN**
+**Task 1.4 — Scheduler, end to end** ✅ **DONE — green against the live domain**
 
 - Built: `CRON_SECRET` guard, `/api/cron/ping` (authenticated, touches nothing), `keepalive` on Vercel cron in `vercel.json`, and `.github/workflows/scheduler-check.yml`. Verified against a local production build — **401 unauthenticated, 401 with a wrong bearer, 200 with the right one**.
-- Outstanding: the same run against the live domain. Needs repo variable `APP_URL` and repo secret `CRON_SECRET`, and depends on 1.3.
+- Proven against the live domain, not just `localhost`.
 - Notes: `APP_URL` must be the **stable production domain**. Per-deployment URLs change every deploy and the scheduler silently no-ops. The workflow fails loudly on anything but a 200 — a scheduler that exits 0 on a 401 is one that has quietly stopped working.
 
 **Task 1.5 — The settings page** ✅ **DONE**
@@ -592,7 +687,7 @@ Standalone scripts in `scripts/`, importing **nothing** from app code — a prob
 
 **Task 2.4 — Account-insight backfill (Q3)** ⚠️ **PARTIAL — only `reach` was actually tested**
 
-### Task 2.6 — Fix the probe and re-run Q3 properly ★ **next**
+### Task 2.6 — Fix the probe and re-run Q3 properly ✅ **DONE — resolved Q3a, misread Q3b**
 
 - **The bug:** `probeBackfill` in `scripts/probe/account-insights.ts` sends `metric` + `period` + window but **not** `metric_type=total_value`, so four of five metrics errored `(#100)` and only `reach` was tested.
 - **Steps:**
@@ -604,17 +699,14 @@ Standalone scripts in `scripts/`, importing **nothing** from app code — a prob
      - how far back the window can be pushed before values stop.
 - **Why the shape question decides a table:** if those four metrics only support `total_value`, there is no daily series for them, and per-day values mean **one request per day** — 30 for a month, 365 for a year. Affordable at ~1% observed usage, but a different operation from the single windowed call `reach` supports. The schema question is therefore not only "which shape" but **whether `account_daily` can hold all five metrics per day at all, or whether four of them are window aggregates needing their own table.**
 - **Owner:** account owner — holds the token.
-- **Blocker:** Task 3.1 cannot be written until this returns.
+- **Outcome:** it returned, and **Q3a is answered** — all six metrics yield a usable daily value, so `account_daily` holds everything and **Task 3.1 is unblocked**. What it got wrong is Q3b, where it conflated a per-request range cap with a history horizon; that is Task 2.9's job and it gates only backfill depth.
 
-### Task 2.7 — Verify the `FOLLOWER` / `NON_FOLLOWER` mapping ★
+### Task 2.7 — Verify the `FOLLOWER` / `NON_FOLLOWER` mapping ⚠️ **RAN — compared the wrong quantity**
 
-- **Steps:** request `follower_count` as a series over the **same 30-day window**; take the net change end to end; compare against `FOLLOWER − NON_FOLLOWER` (here, `37 − 61 = −24`).
-- **Reading it:** the **sign** is what discriminates. If net change is ≈ −24, `FOLLOWER` means follows and `NON_FOLLOWER` means unfollows. If it is ≈ +24, the mapping is reversed. If it is neither, the dimensions mean something else entirely.
-- **Two caveats on the method:** if the net change happens to be near zero the test is **inconclusive**, and a longer window is needed. And window boundaries must match exactly — an off-by-one at either edge produces a small mismatch, so tolerate magnitude drift and judge on sign.
-- **If it cannot be confirmed:** the dashboard shows the metric **unlabelled or not at all**. It does not guess. A confidently inverted number under the word "unfollows" is precisely the failure mode this project is organised against.
-- **Record the verification and its result in `docs/graph-api.md`.** This is a semantic question about someone else's API and it will otherwise be forgotten and then re-guessed.
+- It compared `FOLLOWER − NON_FOLLOWER` (a net difference) against readings of `follower_count` that assumed a daily delta or a running total, and reported the mapping "reversed". The series is neither: it appears to be **gross new follows per day**, which the probe had no branch for. See **Q2a**.
+- **Superseded by Task 2.9** (add the gross-follows branch) and **Task 2.10** (the seven-day check against the profile `followers_count`). The method described here originally is retired — do not re-run it.
 
-### Task 2.8 — Write `docs/graph-api.md`
+### Task 2.8 — Write `docs/graph-api.md` ✅ **DONE** — pushed in `44d0a31`
 
 - **Steps:** write it from probe output, not from Meta's documentation. It must carry, at minimum:
   - `metric_type=total_value` and exactly which metrics require it
@@ -624,11 +716,11 @@ Standalone scripts in `scripts/`, importing **nothing** from app code — a prob
   - the `FOLLOWER`/`NON_FOLLOWER` verification and its outcome
   - the pinned API version, and the version Meta actually served
   - Meta error code `1` as transient, worth retrying
-- **Blocker:** Stage 3 does not start until this exists.
+- Written with `_pending_` blanks for the open questions rather than plausible guesses — a filled-in cell that turns out wrong is worse than an empty one, and this file is what the sync layer gets written from. Fill the blanks as 2.9 and 2.10 answer them.
 
 ## Stage 3 — Foundation
 
-**Task 3.1** — Data model (**A1**). **Blocker: Task 2.6 only** — the `account_daily` / `account_windows` shape. Q1 and Q2 are answered; the rest of the schema is unblocked.
+**Task 3.1** — Data model (**A1**). ✅ **UNBLOCKED.** Q3a settled the only open shape question: `account_daily` holds all six metrics and `account_windows` is deleted. Q3b affects backfill depth, not table shape. Write it.
 
 **Task 3.2 — Backups** ⛔ blocks 3.3
 
@@ -674,20 +766,19 @@ Per **B3**. `lib/time.ts` and its boundary test come first.
 
 # PART D — OPEN QUESTIONS
 
-Q1, Q2 and Q4 are answered. What remains is one shape question that blocks the
-schema, one range question, and one semantic question about someone else's API.
+Q1, Q2, Q3a and Q4 are answered, and **nothing here blocks the schema any more**. What remains is one range question, one semantic question about someone else's API, and one number to read off a console.
 
-| #         | Question                                                                                                                                                                                                      | Resolution method                                                                                                                                | Owner         | What changes on the answer                                                                                                                                    |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Q3a** ★ | Do `views`, `profile_views`, `accounts_engaged` and `total_interactions` return a **per-day series** or a **single window total** — and does a one-day window (`since` = `until`) yield a usable daily value? | Task 2.6 — re-run with `metric_type=total_value` over 2/7/30/90/365 days                                                                         | Account owner | **Whether `account_daily` can hold all five metrics per day at all**, or whether four of them are window aggregates needing their own table. Blocks Task 3.1. |
-| **Q3b**   | How far back do account insights reach — is 30 days the ceiling, or do 90 and 365 also return?                                                                                                                | Task 2.6                                                                                                                                         | Account owner | How much history the first sync populates, and how deep the backup requirement really is.                                                                     |
-| **Q2a** ★ | Do `FOLLOWER` / `NON_FOLLOWER` mean follows / unfollows, or something else?                                                                                                                                   | Task 2.7 — compare `FOLLOWER − NON_FOLLOWER` (−24) against the net change in the `follower_count` series over the same window; **judge on sign** | Account owner | Whether the dashboard can label these at all. If unconfirmed it shows the metric unlabelled or not at all — it does **not** guess.                            |
-| **Q5**    | What are the current free-tier quota limits?                                                                                                                                                                  | Read live from AI Studio; record with date                                                                                                       | Account owner | Rationing caps. **Never hardcode a number from a blog** — limits were cut in late 2025 and are no longer published statically.                                |
+| #         | Question                                                                                                                                                           | Resolution method                                                                                                          | Owner         | What changes on the answer                                                                                                     |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| **Q3b** ★ | Is 30 days a **per-request range cap** or a **history horizon**? Every window tested so far ended at `now`, so the two are indistinguishable.                      | Task 2.9 — one request for a past 30-day window (60 days ago → 31 days ago), then walk backwards                           | Account owner | How deep `reach` and `follower_count` backfill, and the depth figure in the backup argument. **Not** the table shape.          |
+| **Q2a** ★ | Do `FOLLOWER` / `NON_FOLLOWER` mean follows / unfollows? The gross-follows reading fits exactly — `sum(follower_count) = 35 = FOLLOWER` — but may be tautological. | Task 2.10 — seven-day check against the **profile** `followers_count`, a different edge; judge on sign and rough magnitude | Account owner | Whether the dashboard can label these. Until confirmed they are stored but shown unlabelled — it does **not** guess.           |
+| **Q5**    | What are the current free-tier quota limits?                                                                                                                       | Read live from AI Studio; record with date                                                                                 | Account owner | Rationing caps. **Never hardcode a number from a blog** — limits were cut in late 2025 and are no longer published statically. |
 
 ### Resolved, kept for the record
 
 - **Q1 — how far back do media insights reach?** No boundary. 242/243 posts, oldest 2021-06-04, 1,907 days. The sparse-dashboard premise is dead and a backfill is mandatory.
 - **Q2 — does `follows_and_unfollows` return values?** Yes, with `metric_type=total_value` **and** `breakdown=follow_type`. The remaining question is semantic, not existential — see Q2a.
+- **Q3a — series or window total, and is a single day addressable?** All six metrics yield a usable daily value. `account_daily` holds everything; `account_windows` deleted. **The schema is unblocked.**
 - **Q4 — what is the chat's acceptance test?** Set. Answer-and-refuse in one turn; see **B1**.
 - **Is `shortcode` present on every media type?** Present across the types this account posts. The join key holds.
 - **Is `thumbnail_url` universally present?** No — type-conditional, `VIDEO/REELS` only. Confirmed, and the probe now labels it correctly rather than reporting a false absence.

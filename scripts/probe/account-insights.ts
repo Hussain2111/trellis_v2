@@ -145,20 +145,46 @@ async function probeShapes(): Promise<void> {
   }
 }
 
-/** Q3b — how far back the window reaches. */
-async function probeRange(): Promise<void> {
-  console.log('\n══ Q3b: how far back does the window reach? ' + '═'.repeat(33));
-  console.log('  (30 days is already confirmed for reach and follower_count)\n');
+/** A window that does NOT end at `now`. This is the whole point of Q3b. */
+function pastWindow(startDaysAgo: number, endDaysAgo: number): Record<string, string> {
+  return {
+    since: String(now - startDaysAgo * DAY),
+    until: String(now - endDaysAgo * DAY),
+  };
+}
 
+async function askEither(
+  metric: string,
+  window: Record<string, string>,
+): Promise<Outcome & { usage: Record<string, string> }> {
+  const plain = await ask(metric, window);
+  if (plain.shape !== 'error') return plain;
+  return ask(metric, { metric_type: 'total_value', ...window });
+}
+
+/**
+ * Q3b — is 30 days a per-request RANGE CAP or a real HISTORY HORIZON?
+ *
+ * The previous version of this function could not tell. Every window it tried
+ * ended at `now`, so a cap and a horizon produce byte-identical output, and it
+ * concluded "the largest window still returning values is how much history the
+ * first sync can populate" — which asserts one reading of evidence that cannot
+ * distinguish them.
+ *
+ * It also pushed only `outcome.shape` into its table and discarded
+ * `outcome.detail`, so `90d:error` printed with no message. The `(#100)` text
+ * elsewhere in the same run is exactly what identified the metric_type
+ * requirement; whatever Meta said about the 90-day request went in the bin.
+ * Both are fixed here.
+ */
+async function probeRange(): Promise<void> {
+  console.log('\n══ Q3b: range cap, or history horizon? ' + '═'.repeat(38));
+
+  console.log('\n  (a) Windows ENDING TODAY — these cannot distinguish the two.\n');
   for (const metric of [...METRICS, 'follower_count']) {
     const cells: string[] = [];
     for (const days of WINDOWS) {
-      const plain = await ask(metric, windowParams(days));
-      const outcome =
-        plain.shape === 'error'
-          ? await ask(metric, { metric_type: 'total_value', ...windowParams(days) })
-          : plain;
-
+      const outcome = await askEither(metric, windowParams(days));
       cells.push(
         outcome.shape === 'series'
           ? `${days}d:${outcome.points}pts`
@@ -166,14 +192,37 @@ async function probeRange(): Promise<void> {
             ? `${days}d:total`
             : `${days}d:${outcome.shape}`,
       );
+      // Never swallow the message. It is usually the answer.
+      if (outcome.shape === 'error') {
+        console.log(`      ${metric} @ ${days}d → ${outcome.detail}`);
+      }
     }
     console.log(`  ${metric.padEnd(20)} ${cells.join('  ')}`);
   }
 
+  console.log('\n  (b) THE DISCRIMINATING TEST — 30-day windows entirely in the past.\n');
+  console.log('      Values here mean 30 days is a per-request CAP, not a boundary:');
+  console.log('      history goes deeper and the backfill simply pages backwards.\n');
+
+  const pastWindows: [string, number, number][] = [
+    ['60 → 31 days ago', 60, 31],
+    ['90 → 61 days ago', 90, 61],
+    ['180 → 151 days ago', 180, 151],
+    ['365 → 336 days ago', 365, 336],
+  ];
+
+  for (const metric of ['reach', 'follower_count']) {
+    console.log(`  ${metric}`);
+    for (const [label, from, to] of pastWindows) {
+      const outcome = await askEither(metric, pastWindow(from, to));
+      console.log(`    ${label.padEnd(20)} ${outcome.shape.padEnd(7)} ${outcome.detail}`);
+    }
+  }
+
   console.log(
-    '\n  Read it this way: the largest window still returning values is how much\n' +
-      '  history the first sync can populate. If 365 returns, the backfill scope\n' +
-      '  grows again and the backup depth argument changes with it.',
+    '\n  Read it this way: if (b) returns values where (a) errored, the 30-day limit\n' +
+      '  is a per-request range cap. The backfill then pages backwards in 30-day\n' +
+      '  windows until the values stop, and THAT point is the real horizon.',
   );
 }
 
@@ -269,41 +318,72 @@ async function verifyMapping(follower: number, nonFollower: number, days: number
   console.log(`    sum of values (if daily deltas):  ${sumOfDailies}`);
   console.log(`    last − first  (if running total): ${endToEnd}`);
 
-  const candidates = [
-    { label: 'sum of values', value: sumOfDailies },
-    { label: 'last − first', value: endToEnd },
-  ];
-
+  // Hypothesis 3, which the previous version had no branch for and which the
+  // numbers actually fit: follower_count is GROSS NEW FOLLOWS PER DAY. Under
+  // that reading sum(follower_count) should equal FOLLOWER exactly, and the
+  // last run showed 35 = 35.
+  //
+  // The old code compared the sum against FOLLOWER − NON_FOLLOWER — a gross
+  // figure against a net difference — and concluded the mapping was reversed.
   console.log('');
-  for (const candidate of candidates) {
-    // A near-zero net change cannot discriminate: both mappings predict
-    // something close to nothing, so agreement proves nothing. That is an
-    // inconclusive result, not a confirmation — the quiet false positive this
-    // check exists to avoid.
-    if (Math.abs(candidate.value) < Math.abs(difference) * 0.25) {
-      console.log(
-        `  ${candidate.label.padEnd(16)} ${candidate.value} — INCONCLUSIVE, too close to zero to discriminate. Widen the window.`,
-      );
-      continue;
-    }
-    if (Math.sign(candidate.value) === Math.sign(difference)) {
-      console.log(
-        `  ${candidate.label.padEnd(16)} ${candidate.value} — signs AGREE: FOLLOWER = follows, NON_FOLLOWER = unfollows.`,
-      );
-    } else {
-      console.log(
-        `  ${candidate.label.padEnd(16)} ${candidate.value} — signs DISAGREE: the mapping is REVERSED, or the dimensions mean something else.`,
-      );
-    }
+  const grossMatch = Math.abs(sumOfDailies - follower);
+  if (grossMatch === 0) {
+    console.log(`  GROSS MATCH  sum(follower_count) = FOLLOWER = ${follower} exactly.`);
+  } else if (grossMatch <= Math.max(2, follower * 0.05)) {
+    console.log(
+      `  GROSS MATCH  sum(follower_count) ${sumOfDailies} ≈ FOLLOWER ${follower} (off by ${grossMatch}).`,
+    );
+  } else {
+    console.log(`  no gross match: sum(follower_count) ${sumOfDailies} vs FOLLOWER ${follower}.`);
   }
 
+  if (grossMatch <= Math.max(2, follower * 0.05)) {
+    console.log(
+      '\n  That supports follower_count being gross new follows per day, and so\n' +
+        '  FOLLOWER = follows, NON_FOLLOWER = unfollows.\n' +
+        '\n  BUT IT IS WEAK EVIDENCE, and this is the part to be careful about: if\n' +
+        '  follower_count really is gross new follows, then this identity may be\n' +
+        '  near-tautological — two Meta figures derived from the same counter,\n' +
+        '  agreeing because they are the same number twice. Consistency between\n' +
+        '  two views of one source is not independent confirmation.',
+    );
+  }
+
+  // The genuinely independent check uses a DIFFERENT edge: the profile's own
+  // followers_count, observed over elapsed time. Only sign and rough magnitude
+  // count — the profile figure also moves for reasons this metric never sees,
+  // such as deactivated accounts and spam removals by Meta.
   console.log(
-    '\n  Judge on sign, not size — window edges do not align perfectly and a few\n' +
-      '  units of drift are expected. If both readings are inconclusive, widen the\n' +
-      '  window and re-run. If they disagree with each other, the dashboard shows\n' +
-      '  this metric UNLABELLED or not at all until it is understood. It does not guess.\n' +
-      '  Record the outcome in docs/graph-api.md — this will otherwise be re-guessed.',
+    `\n  INDEPENDENT CHECK (needs seven days, cannot be rushed):\n` +
+      `    1. Record accounts.followers_count today. Record it again in 7 days.\n` +
+      `    2. Over that same window, request follows_and_unfollows and follower_count.\n` +
+      `    3. Both must hold:\n` +
+      `         sum(follower_count) == FOLLOWER again\n` +
+      `         FOLLOWER − NON_FOLLOWER == the observed change in followers_count\n` +
+      `       (predicted net for this window: ${difference})\n` +
+      `\n  Judge step 3 on sign and rough magnitude, not exactness.\n` +
+      `  Until both hold, the dashboard stores these and shows them UNLABELLED.\n` +
+      `  A coincidence at n=1 is still a coincidence.`,
   );
+
+  // Only meaningful if the series could plausibly be a running total. It starts
+  // and ends at 0 against an account of several thousand followers, so it
+  // cannot be one — and reporting INCONCLUSIVE for an inapplicable test adds
+  // noise to a decision that is already delicate.
+  const looksLikeRunningTotal = numeric[0] !== 0 && numeric[numeric.length - 1] !== 0;
+  if (looksLikeRunningTotal) {
+    console.log(
+      `\n  Running-total reading: last − first = ${endToEnd}, ` +
+        `${Math.sign(endToEnd) === Math.sign(difference) ? 'signs agree' : 'signs disagree'} with ${difference}.`,
+    );
+  } else {
+    console.log(
+      `\n  (Running-total reading skipped: the series starts and ends at 0, so it\n` +
+        `   is not a running total. Testing it anyway would only add noise.)`,
+    );
+  }
+
+  console.log('\n  Record the outcome in docs/graph-api.md — this will otherwise be re-guessed.');
 }
 
 async function main(): Promise<void> {

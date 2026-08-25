@@ -25,7 +25,18 @@ if (!url) {
   process.exit(1);
 }
 
-const sql = postgres(url, { max: 1, prepare: false });
+// NOTICEs like `schema "drizzle" already exists, skipping` are normal on any
+// re-run, but postgres-js prints them as fat objects that read exactly like
+// errors. Swallow that severity and let everything else through — a migration
+// script whose happy path looks like a failure gets ignored when it really
+// does fail.
+const sql = postgres(url, {
+  max: 1,
+  prepare: false,
+  onnotice: (notice) => {
+    if (notice.severity !== 'NOTICE') console.warn(notice.message);
+  },
+});
 
 try {
   await migrate(drizzle(sql), { migrationsFolder: './drizzle' });

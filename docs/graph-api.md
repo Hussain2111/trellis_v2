@@ -162,6 +162,22 @@ Three caveats, all of which the probe handles:
 **If it cannot be confirmed, the dashboard shows this metric unlabelled or not
 at all.** It does not guess.
 
+## A trap that is not Meta's fault
+
+`lib/env.ts` reads `process.env` and nothing else. Vitest does not load `.env`,
+so before `vitest.config.ts` gained `setupFiles: ['dotenv/config']` the
+DB-backed tests fell through to the schema default in `lib/env.ts` and ran
+against **whatever database happened to be at that address** — on a machine
+that has ever run another project, a real database with a real schema that is
+not this one.
+
+It surfaced as a schema test reporting fourteen columns "missing from the
+schema entirely" while `psql` showed them present and correct. The tell was a
+row coming back from a table this project does not have.
+
+dotenv does not override variables already set, so CI keeps the `DATABASE_URL`
+it exports and only local runs read the file.
+
 ## Rate limits
 
 After walking 243 posts and requesting insights for each: `[VERIFIED-LIVE]`
