@@ -21,15 +21,25 @@ data, and `probe-*.json` is gitignored for that reason.
 
 ## What each one settles
 
-| Probe                    | Question                                                                                                           | What changes on the answer                                                                                                                 |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `probe:graph`            | Is the token right, and what does the media edge actually serve?                                                   | Field mapping, and whether `business_management` is present                                                                                |
-| `probe:lookback`         | **Q1** — how far back do media insights reach?                                                                     | Whether the chat reasons over most of the account's history or a handful of posts. A backfill task, conditional on the answer.             |
-| `probe:account-insights` | **Q2** — does `follows_and_unfollows` return values? **Q3** — do account insights backfill with an explicit range? | Whether the dashboard shows gross follows/unfollows or net deltas; whether the follower chart is populated on day one or blank for a month |
+| Probe                    | Question                                                                                                                                                                        | What changes on the answer                                                                                                                                     |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `probe:graph`            | Is the token right, and what does the media edge actually serve?                                                                                                                | Field mapping, and whether `business_management` is present                                                                                                    |
+| `probe:lookback`         | **Q1** — how far back do media insights reach?                                                                                                                                  | Whether the chat reasons over most of the account's history or a handful of posts. A backfill task, conditional on the answer.                                 |
+| `probe:account-insights` | **Q3a** — series or window total, and is a one-day window addressable? **Q3b** — how far back does the window reach? **Q2a** — what do `FOLLOWER`/`NON_FOLLOWER` actually mean? | Whether `account_daily` can hold all five metrics per day at all; how much history first sync populates; whether the follows/unfollows figures can be labelled |
 
-`probe:lookback` is the one that matters most and the one that takes longest —
-it walks every post in the account, paced deliberately, and it is the largest
-burst any script here makes.
+`probe:lookback` has been run and is answered: **no boundary, 242/243 posts,
+oldest 1,907 days**. It took 4m53s to walk the account, and that pace is roughly
+what the backfill should use.
+
+`probe:account-insights` is now the one that matters. Its first version had a
+bug that cost most of its answer — it omitted `metric_type=total_value`, so four
+of five metrics errored and only `reach` was tested. **The rewritten version does
+not assume which metrics need the parameter; it tries both forms for every
+metric**, because the point of a probe is to find out rather than to confirm.
+
+Its most important line is `ONE-DAY WINDOW`. That is what decides whether a
+per-day backfill is possible at all, and therefore whether four of the five
+account metrics can live in a per-day table.
 
 ## Reading the output
 

@@ -2,13 +2,27 @@
 
 ## Context
 
-Trellis is a tool for one Instagram creator (`glowithuzma`, K-beauty, 4,881 followers, 228 posts) that reads their own account through Meta's Graph API. A previous build shipped ten features, deployed late, and discovered every real infrastructure bug within hours of first contact with live services. It is being discarded and the repository recreated.
+Trellis is a tool for one Instagram creator (`glowithuzma`, K-beauty, 4,881 followers, **243 posts reaching back to 2021**) that reads their own account through Meta's Graph API. A previous build shipped ten features, deployed late, and discovered every real infrastructure bug within hours of first contact with live services. It is being discarded and the repository recreated.
 
 What is _not_ being discarded is the operational knowledge. That record — `NOTES.md`, `docs/roadmap.md`, `docs/cutover.md`, `docs/instagram-setup.md`, 3,291 lines — exists only in `Hussain2111/Trellis`, on branch `claude/trellis-v1-growy-parity-n509nm` at `2c97c27`. **So that repository is left exactly as it is.** The new build gets a new repository under a new name, which means the old one never has to be renamed, emptied or deleted, and no file has to be correctly enumerated to survive.
 
 The new product is three surfaces and nothing else: a **Chat** grounded in the account's own data, a **Dashboard** of AI insight cards over account metrics, and a **Calendar** for drafts and posting dates. It runs at $0/month, serves one account, and is intended to become a commercial SaaS later.
 
 The outcome this plan is aimed at: a deployed skeleton meeting real infrastructure before any feature exists, then three surfaces built on one schema, one design language, and one way of calling a model — with a hard guarantee that no number reaches the screen unless a SQL query produced it.
+
+## Where this actually is
+
+> **Keep this section current as work finishes, not as errors are noticed.** It has now been stale three times in two days, each time describing a world that had moved on — a repository that had been created, a stage that had been built, a token that had been regenerated. A roadmap that overstates what is left is as misleading as one that understates it, and the cost lands on whoever reads it next. Updating it is part of finishing a task, not a separate chore.
+
+**Stage 0 — done.** `Hussain2111/trellis_v2` exists and carries the work. The old repository was never touched.
+
+**Stage 1 — partly done.** Built and locally verified: the app, CI against a real Postgres container, migrations through a script, the keepalive write, cron auth (401/401/200 against a production build), the three-item nav, and `/settings` rendering resolved environment values. The **Supabase project exists** — the v1 project reused, dumped, `public` wiped, password reset — with its pooler string in `.env`. **Outstanding: run the migration against it, and deploy to Vercel.** Until the deploy exists, the scheduler has only been proven against `localhost`, which is a materially weaker claim than proving it against a domain.
+
+**Stage 2 — probes written and run**, against a freshly regenerated seven-scope token with 56 days left. Q1 and Q2 answered, Q3 half-answered because the probe omitted a required parameter. Tasks 2.6 and 2.7 are the remainder, and 2.6 is the last thing blocking the schema.
+
+**Stage 3 — one foundation piece landed early** (the provider interface, plus the validator and the time module from Stage 1), because nothing gated them. The data model waits on 2.6.
+
+**Not started:** Stages 4, 5, 6.
 
 ---
 
@@ -19,8 +33,70 @@ The outcome this plan is aimed at: a deployed skeleton meeting real infrastructu
 | 1   | **`account_id` on every table, no auth**                       | One row in `accounts`. No users table, no login. The retrofit is the expensive part of multi-tenancy, not the column.                                                                                                                                                        |
 | 2   | **Private repository**                                         | Private repos get 2,000 free Actions minutes a month; three daily workflows plus a weekly backup use a small fraction of that. Going public would have made the source of a product intended for sale world-readable in exchange for a resource already available. Reversed. |
 | 3   | **No post-analytics readout, but keep the data** — reconfirmed | The dashboard's lower half is account/follower metrics only. **There is deliberately nowhere in the UI to glance at how recent posts performed.** Per-post insights are still synced and reachable by asking the chat.                                                       |
-| 4   | **Chat acceptance test deferred to Stage 2**                   | Set once the probes show what data actually exists to reason over. Stage 4 cannot close until it is set and met.                                                                                                                                                             |
+| 4   | **Chat acceptance test — set, see B1**                         | Answer-and-refuse in one turn. Chosen because answering fully and refusing fully are both easy; the hard case is holding both in one reply without the confident half lending credibility to the half it cannot support. Stage 4 cannot close until it is met.               |
 | 5   | **Buffer → validate → render** for chat output                 | No token streaming of answer text. Tool progress may stream. The drop-don't-caveat rule is unconditionally enforceable this way.                                                                                                                                             |
+
+## What the probes settled `[VERIFIED-LIVE]`
+
+All three ran. The headline reverses the assumption the previous roadmap was built on.
+
+### Q1 — RESOLVED. There is no lookback boundary.
+
+**242 of 243 posts return insights. The oldest is 2021-06-04, 1,907 days old.** No older post lacked data — the boundary is beyond this account's entire history.
+
+Four things follow, and none is small:
+
+1. **The sparse-dashboard premise is dead.** Every note about coverage warnings and a dashboard that stays thin for months was written against an assumption that is now false. The chat has five years of real reach, views, saves and shares available on day one. Empty and thin-data states still have to exist and still have to be designed — they are now **rare rather than the default**.
+2. **A backfill is mandatory, and it is the largest single operation in the project.** 243 posts, one insights request each. See Task 3.3.
+3. **Historical posts can only ever hold `latest`.** Meta serves cumulative lifetime totals, so the backfill can fill `checkpoint = 'latest'` for all 243 — but `t24`, `t48` and `t7d` require having sampled at that age, and that age has passed. The data therefore has **two shapes, permanently**.
+4. **Format comparison is viable — the earlier conclusion is reversed.** "This account posts one format" was an artefact of looking at ten posts. Across 243 there are substantial samples of `IMAGE/FEED`, `VIDEO/REELS` and `CAROUSEL_ALBUM/FEED`. The refusal path stays, because it is still correct when a floor genuinely is not met — but the design must not be built around refusing.
+
+**One post fails**, with Meta error code `1` — their generic _transient_ error, not a permanent one. The backfill retries two or three times with backoff before writing `unavailable`. It is likely 243/243.
+
+### Q2 — RESOLVED, but the mapping is ambiguous and must not be guessed.
+
+`metric_type=total_value` **and** `breakdown=follow_type` together, over 30 days, return real values:
+
+```
+[{"dimension_values":["FOLLOWER"],"value":37},
+ {"dimension_values":["NON_FOLLOWER"],"value":61}]
+```
+
+The dimension keys are `FOLLOWER` and `NON_FOLLOWER` — **not** `FOLLOW` and `UNFOLLOW`. Reading the first as follows and the second as unfollows is plausible; it is equally plausible that the breakdown describes the actor's relationship at the time of the event. Getting it backwards would put a confidently inverted number on the dashboard under the label "unfollows" — exactly the failure the blank-not-zero discipline exists to prevent.
+
+**Verify before labelling anything.** See Task 2.7.
+
+### Q3 — HALF-RESOLVED. The probe had a bug that hid the rest.
+
+Four of five metrics errored identically:
+
+```
+(#100) The following metrics (views) should be specified with parameter metric_type=total_value
+```
+
+`views`, `profile_views`, `accounts_engaged` and `total_interactions` all require `metric_type=total_value`, and the probe did not send it. **So Q3 was only actually tested for `reach`.** This is a client-level finding, not merely a probe fix — the sync layer needs that parameter too.
+
+Established: **`reach` backfills** (a 30-day window returned 30 days) and **`follower_count` backfills** (30 days returned). Note the metric is `follower_count`, **singular** — distinct from the account field `followers_count`. Two names for closely related things; the schema must not blur them.
+
+**The unresolved half is a shape question, and it decides a table.** `metric_type=total_value` typically returns _one aggregate for the requested window_, not a per-day series. If those four metrics only support that, there is no daily series for them at all, and per-day values would mean **one request per day** — 30 for a month, 365 for a year. Affordable at the observed usage, but a different operation from the single windowed call `reach` supports. See Task 2.6.
+
+### Rate limits are generous. Keep the guard anyway.
+
+After walking 243 posts and requesting insights for each:
+
+```
+x-business-use-case-usage: call_count: 1, total_cputime: 1, total_time: 1,
+                           estimated_time_to_regain_access: 0
+```
+
+These read as percentages of the hourly allowance. **One percent for the largest operation the app will ever perform** means the backfill is comfortably affordable. It does **not** mean the backoff, the cursor or the per-run budget come out — they cost nothing when unused, and they are the difference between a throttled sync that resumes and one that silently restarts.
+
+### Two smaller discrepancies
+
+- **`media_count` says 229; the walk found 243.** Use **pagination exhaustion** as the sync's terminator, never the count — a completion check against `media_count` stops 14 posts early.
+- **`thumbnail_url` confirmed type-conditional**, as expected: present on `VIDEO/REELS`, absent on `CAROUSEL_ALBUM/FEED` and `IMAGE/FEED`. The probe labelled it `TYPE-COND` rather than absent, which is the Stage 2 fix working.
+
+---
 
 ## Stack
 
@@ -67,10 +143,11 @@ Specified before any surface. Three features planned on three different undernea
 
 ### Measurement
 
-| Table           | Key columns                                                                                                                                                                                                                    | Notes                                                                                                                                                                                                                           |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `post_insights` | `post_id`, `checkpoint` (`t24`\|`t48`\|`t7d`\|`latest`), `captured_at`, `reach`, `views`, `saved`, `shares`, `likes`, `comments`, `total_interactions`, `unavailable` jsonb — unique on (`post_id`, `checkpoint`)              | Meta serves cumulative lifetime totals with no historical curve, so **a curve only exists if it was sampled**. This table is the sampling record. `unavailable` names _why_ a metric is missing, so a blank can explain itself. |
-| `account_daily` | `account_id`, `day` (text `YYYY-MM-DD`, Riyadh), `followers_count`, `reach`, `views`, `profile_views`, `accounts_engaged`, `total_interactions`, `follows`, `unfollows`, `unavailable` jsonb — unique on (`account_id`, `day`) | `follows`/`unfollows` nullable pending **Q2**. `day` as text, not date, so the Riyadh boundary is decided once at write time.                                                                                                   |
+| Table                                          | Key columns                                                                                                                                                                                                       | Notes                                                                                                                                                                                                                                                                                                                                                           |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `post_insights`                                | `post_id`, `checkpoint` (`t24`\|`t48`\|`t7d`\|`latest`), `captured_at`, `reach`, `views`, `saved`, `shares`, `likes`, `comments`, `total_interactions`, `unavailable` jsonb — unique on (`post_id`, `checkpoint`) | Meta serves cumulative lifetime totals with no historical curve, so **a curve only exists if it was sampled**. This table is the sampling record. `unavailable` names _why_ a metric is missing, so a blank can explain itself.                                                                                                                                 |
+| `account_daily`                                | `account_id`, `day` (text `YYYY-MM-DD`, Riyadh), `follower_count`, `reach`, `unavailable` jsonb — unique on (`account_id`, `day`)                                                                                 | **Confirmed per-day series only.** `reach` and `follower_count` both returned 30 days against an explicit window. `day` as text, not date, so the Riyadh boundary is decided once at write time.                                                                                                                                                                |
+| `account_windows` — **shape pending Task 2.6** | `account_id`, `window_start`, `window_end`, `views`, `profile_views`, `accounts_engaged`, `total_interactions`, `follows`, `unfollows`                                                                            | Provisional. `metric_type=total_value` may return one aggregate per window rather than a series, in which case these four metrics cannot live in `account_daily` at all. If Task 2.6 shows a one-day window yields a usable daily value, they fold back into `account_daily` and this table does not exist. **Do not write either version before 2.6 returns.** |
 
 ### Product
 
@@ -90,7 +167,12 @@ Specified before any surface. Three features planned on three different undernea
 | `model_runs` | `purpose` (`chat`\|`cards`), `provider`, `model`, token counts, `status`, `error`. The quota-rationing ledger. Failures count against the ledger — a failed call spent the same quota. |
 
 **Notes.** All timestamps `timestamptz`, stored UTC. Riyadh is a presentation and grouping concern only (**A6**, **B3**).
-**Blockers.** `account_daily`'s `follows`/`unfollows` shape depends on **Q2**; `post_insights` depth depends on **Q1**. Both resolve in Stage 2, before this schema is written.
+
+**Naming, because two of these are nearly the same word.** The Graph _metric_ is `follower_count` (singular); the account _field_ is `followers_count` (plural). They mean closely related but different things and the schema must not blur them: `accounts.followers_count` is the current value from the account edge, `account_daily.follower_count` is the historical series from the insights edge.
+
+**The two shapes of `post_insights`, permanently.** Historical posts get exactly one row, at `checkpoint = 'latest'` — excellent for medians, baselines, format comparison and ranking. Posts published after go-live get a real curve. **`t24`/`t48`/`t7d` can never exist for a 2021 post**, because producing one would have required sampling at that age. Absence of `t24` must read as _not sampled_, distinct from zero and distinct from _too new_.
+
+**Blockers.** `account_daily` / `account_windows` shape depends on **Task 2.6**. Everything else is unblocked — Q1 and Q2 are answered.
 
 ## A2 — Sync layer
 
@@ -98,12 +180,25 @@ Specified before any surface. Three features planned on three different undernea
 
 **Four sync units**, each independently resumable and independently failable:
 
-| Unit            | Fetches                                                                                                                              | Cadence                                |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------- |
-| `account`       | Account fields + account insights (`reach`, `views`, `profile_views`, `accounts_engaged`, `total_interactions`) into `account_daily` | Daily                                  |
-| `media`         | Media edge, paginated, cursor in `sync_runs.cursor`                                                                                  | Daily; full walk on first run          |
-| `post_insights` | Per-post insights at whichever checkpoints are now due                                                                               | Daily, and this is what creates curves |
-| `comments`      | Comments for the most recent N posts                                                                                                 | Daily                                  |
+| Unit            | Fetches                                                                                                                                                                                                                   | Cadence                                |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `account`       | Account fields + account insights (`reach`, `views`, `profile_views`, `accounts_engaged`, `total_interactions`) into `account_daily`                                                                                      | Daily                                  |
+| `media`         | Media edge, paginated, cursor in `sync_runs.cursor`. **Terminated by pagination exhaustion, never by `media_count`** — the count says 229 where the walk found 243, so a completion check against it stops 14 posts short | Daily; full walk on first run          |
+| `post_insights` | Per-post insights at whichever checkpoints are now due                                                                                                                                                                    | Daily, and this is what creates curves |
+| `comments`      | Comments for the most recent N posts                                                                                                                                                                                      | Daily                                  |
+| `backfill`      | One-time historical pass over all 243 posts, `latest` only                                                                                                                                                                | **Runs once**, see below               |
+
+**`metric_type=total_value` is required** for `views`, `profile_views`, `accounts_engaged` and `total_interactions`. Without it the request errors `(#100)` rather than returning partial data. `reach` does not need it. This is written down in `docs/graph-api.md` and enforced in the client, not remembered.
+
+### The backfill — the largest single operation in the project
+
+243 posts, one insights request each. The lookback probe took 4m53s to walk it at a deliberately unhurried pace, and that is roughly the right pace.
+
+- **It runs once.** Guarded by a flag, or by checking whether `post_insights` is empty. A backfill that re-runs is a rate-limit incident waiting for a redeploy.
+- **`latest` only.** It cannot produce `t24`/`t48`/`t7d` for a historical post, because that would have required sampling at that age. Attempting to synthesise one from a lifetime total would be inventing a measurement.
+- **Same resumable cursor and per-run budget as the daily sync.** The Actions loop calls until done, across as many invocations as it takes.
+- **Deliberately throttled.** There is no reason to rush a one-time operation, and this is exactly where a rate limit would bite.
+- **Retry Meta error code `1` two or three times with backoff before writing `unavailable`.** Code 1 is their generic _transient_ error. The single failing post in the probe is likely recoverable, making it 243/243.
 
 **Partial failure is the design centre, not an edge case:**
 
@@ -116,7 +211,11 @@ Specified before any surface. Three features planned on three different undernea
 
 ### Rate limiting — designed for, not discovered
 
-**The first sync is the largest burst this app will ever make**, and it happens before anything else works. 228 posts means a full media walk plus a per-post insights request each; if **Q1** comes back deep, a backfill lands on top of that. Meta enforces hourly traffic caps, so first run is precisely where one gets hit. This is a first-contact bug of exactly the class Stage 1 exists to catch, and no unit test will find it.
+**The first sync is the largest burst this app will ever make**, and it happens before anything else works: a full media walk of 243 posts plus the backfill's per-post insights request on top.
+
+**Measured, not feared.** After exactly that walk, the probe reported `call_count: 1, total_cputime: 1, total_time: 1, estimated_time_to_regain_access: 0` — roughly **one percent** of the hourly allowance for the largest operation the app will ever perform. The backfill is comfortably affordable.
+
+**None of the guards come out on the strength of that.** They cost nothing when unused, and they are the difference between a throttled sync that resumes and one that silently restarts. A headroom measurement taken once on one account is not a guarantee about every future run.
 
 Required in the client and the runner, not bolted on later:
 
@@ -128,7 +227,7 @@ Required in the client and the runner, not bolted on later:
 - **A deliberately throttled first sync.** The initial full walk runs slower than steady-state syncing on purpose.
 
 **Resources.** `docs/graph-api.md` (written from probe output, not from Meta's docs). Pinned API version from a single env-driven constant, surfaced on the settings page.
-**Blockers.** Q1, Q2, Q3.
+**Blockers.** Task 2.6 (the `account_daily` / `account_windows` shape) and Task 2.7 (the follows/unfollows mapping). Q1 is answered.
 
 ## A3 — Scheduling layer
 
@@ -155,7 +254,11 @@ All endpoints behind `Authorization: Bearer $CRON_SECRET`. Repo **variable** `AP
 
 ### Backups — because one table is irreplaceable
 
-Posts, comments and per-post insights can be re-fetched from Meta at any time. **`account_daily` cannot.** It is built one row per day by a cron, and Meta does not serve it retroactively (pending **Q3**, which may soften this by ~30 days but not by months). If the database is lost after six months, six months of follower history is gone permanently — and Supabase Free has no automated backups.
+Posts, comments and per-post insights can be re-fetched from Meta at any time — and after Q1, _all_ of them can, back to 2021.
+
+**`account_daily` is the exception, and Q3 softened this without removing it.** `reach` and `follower_count` do backfill across at least a 30-day window, so a lost database is recoverable to a 30-day depth rather than to nothing. **Thirty days of recoverable history is not a disaster-recovery plan.** Beyond that rolling window the series is still built one row per day by a cron and still gone for good, and Supabase Free still has no automated backups.
+
+So `backup.yml` ships before the sync writes, unchanged. If Task 2.6 shows the window reaches 90 or 365 days, the depth improves again — and the argument does not change, because the series only ever grows past whatever that window turns out to be.
 
 `backup.yml` runs weekly against the pooler connection string, dumps to a compressed file, and uploads it as a workflow artifact with the longest retention available. A dump that comes back empty or implausibly small **fails the workflow loudly** rather than uploading a useless artifact — a backup that silently stopped working is worse than none, because it is believed.
 
@@ -230,24 +333,46 @@ Chat first, because it is the core and the other two are shaped by it.
 - States how many posts it reasoned from; declines comparisons that lack the sample.
 - **Will not:** post to Instagram, write to the calendar, or answer about accounts other than the user's.
 
-**Acceptance test: set in Stage 2, met in Stage 4.** It must be a question a general-purpose chatbot could not answer. Deferred by decision 4 because the probes determine what data exists to ask about. **Stage 4 cannot close without it.**
+### The acceptance test `[DECISION]`
+
+> **"Which of my carousels beat my reel median on saves, and which of them were still climbing after 48 hours?"**
+
+It must **answer the first half** — from 243 posts of real history, every figure from SQL, stating the sample it reasoned from — and **refuse the second half**, because those posts were never sampled at 48 hours. In the same reply. Without letting the confident half lend credibility to the half it cannot support.
+
+**Why this one rather than a harder-sounding one.** Answering fully is easy and refusing fully is easy. The failure mode that would make this product untrustworthy is **partial knowledge** — a fluent model blurring the boundary between what it measured and what it is guessing. That is the thing to gate on, and it is the only candidate that can be graded objectively, which matters for something that blocks a stage.
+
+**It is graded twice, and the second time is the real one.**
+
+1. **At the start of Stage 4**, _no_ post has `t48` data — the sync has not been running long enough. The refusal will be correct but for the weaker reason: nothing was sampled at all.
+2. **A week or two later**, once posts published after go-live have real curves, run the identical question again. Now it must **split the set** — answer for the new posts, refuse for the old. That is the version that proves the distinction is actually understood rather than accidentally satisfied.
+
+**Two further questions, hand-judged, not gates:**
+
+- _"How has my carousel-vs-reel saves gap changed over the last two years?"_ — multi-step composition across the full history.
+- _"What do my ten best-reaching posts have in common that my ten worst don't?"_ — the closest thing to what a creator actually wants, and impossible to score. Worth seeing what it does.
+
+### Format comparison is a normal path, not an exception
+
+The earlier "this account posts one format" finding was an artefact of a ten-post sample. Across 243 there are substantial samples of images, reels and carousels, so `getFormatBreakdown` clears its floors comfortably.
+
+The refusal path stays — it is still correct behaviour when a floor genuinely is not met — but **the design must not be built around refusing**, and the tests must cover the answering path as the common case rather than treating thin data as the default.
 
 ### Design
 
 **Tool surface** — every tool returns `{ data, sampleSize, coverage, asOf }`, so thin data and staleness travel with the answer rather than being available on request:
 
-| Tool                                     | Returns                                                                                                                                              |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `getAccountOverview()`                   | Followers, post count, sync freshness, insight coverage                                                                                              |
-| `getFollowerSeries({days})`              | Daily series with explicit gaps — a missing day is missing, not zero                                                                                 |
-| `getPosts({limit, format, since, sort})` | Content: caption, format, date, permalink                                                                                                            |
-| `getPostPerformance({postId})`           | Per-post insights incl. available checkpoints                                                                                                        |
-| `getPostsRanked({metric, since, limit})` | Ranked, with the count actually measured                                                                                                             |
-| `getTrailingMedian({metric, days})`      | The account's own baseline                                                                                                                           |
-| `getFormatBreakdown({minSample})`        | **Returns a refusal object when floors are unmet** — 9 carousels and 1 reel is this account's real pattern, so this is the default case, not an edge |
-| `getComments({postId?, top?})`           | Commenters and what they commented on                                                                                                                |
-| `getCalendarEntries({from, to, status})` | So "what's due this week" is answerable. **Ships in Stage 4 returning an honest empty result**, not in Stage 6 — see note below                      |
-| `getInsightCard({id})`                   | The card→chat contract — see **B2**                                                                                                                  |
+| Tool                                     | Returns                                                                                                                                                                                                                                                                                                         |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `getAccountOverview()`                   | Followers, post count, sync freshness, insight coverage                                                                                                                                                                                                                                                         |
+| `getFollowerSeries({days})`              | Daily series with explicit gaps — a missing day is missing, not zero                                                                                                                                                                                                                                            |
+| `getPosts({limit, format, since, sort})` | Content: caption, format, date, permalink                                                                                                                                                                                                                                                                       |
+| `getPostPerformance({postId})`           | Per-post insights **and which checkpoints exist**. Absence of `t48` must come back as _not sampled_ — distinct from zero, and distinct from _too new_. A 2021 post can never have one, and the chat must not imply it does                                                                                      |
+| `getPostsRanked({metric, since, limit})` | Ranked, with the count actually measured                                                                                                                                                                                                                                                                        |
+| `getTrailingMedian({metric, days})`      | The account's own baseline                                                                                                                                                                                                                                                                                      |
+| `getFormatBreakdown({minSample})`        | Per-format medians with their real sample sizes. Across 243 posts, images, reels and carousels all clear the floors, so **the answering path is the common case**. It still **returns a refusal object when a floor genuinely is not met** — that path is correct and stays, it is simply no longer the default |
+| `getComments({postId?, top?})`           | Commenters and what they commented on                                                                                                                                                                                                                                                                           |
+| `getCalendarEntries({from, to, status})` | So "what's due this week" is answerable. **Ships in Stage 4 returning an honest empty result**, not in Stage 6 — see note below                                                                                                                                                                                 |
+| `getInsightCard({id})`                   | The card→chat contract — see **B2**                                                                                                                                                                                                                                                                             |
 
 **A cross-stage note, so it isn't discovered mid-build.** `getCalendarEntries` reads a surface that ships two stages later. The table exists from Task 3.1 — the whole schema lands at once — so in Stage 4 the tool is real and returns nothing, which is precisely the empty state this product is designed around. Shipping it then rather than in Stage 6 keeps the tool surface fixed across the chat's acceptance testing; adding a tool afterwards means re-checking that the model still reaches for the right one. The Stage 6 work is filling the table, not adding the tool.
 
@@ -324,6 +449,10 @@ A batch that keeps zero cards still writes an `insight_batches` row with a reaso
 **Manual refresh.** A "refresh insights" action, rate-limited to a small daily count against `model_runs`. Not on page load; on explicit intent. A creator who just posted should not wait a day.
 
 **States.** Fewer than four cards → renders fewer, with a line explaining the sample was thin. No sync yet → an onboarding state, not an error. Metric unavailable → blank with a reason, never `0`.
+
+**These states are now rare, and that changes how they are designed.** They were specified against a dashboard expected to be thin for months; with five years of history available from the backfill, thin data is the exception. They still have to exist and still have to explain themselves — but a design that leads with its empty state would now be designing for a case that mostly does not occur.
+
+**Coverage belongs on `/settings`, not hidden.** The probe found 242 of 243 posts returning insights, with one failing on a transient error. After the backfill retries it, state the real figure. A coverage line that reads `243/243` is worth as much as one that reads `242/243` — what matters is that the number is stated rather than assumed.
 
 ### Implementation plan
 
@@ -407,38 +536,42 @@ Stage → task → steps. No timelines.
 - Notes: this went through three versions and the third is the best. Extracting four named files risked getting the list wrong — and it would have, since the brief names three and the fourth (`docs/instagram-setup.md`, holding the seven-scope walkthrough and the Page→`IG_USER_ID` resolution path) is arguably the most valuable. Renaming fixed that but still touched a repository holding the only copy of something. **Giving the new repository a different name removes the need to touch the old one at all** — the rename existed solely to free up the name. The safest version of an archival step is the one with no steps.
 - Optional later, costs nothing and reverses freely: flip the old repo to private.
 
-**Task 0.2 — Create the new repository**
+**Task 0.2 — Create the new repository** ✅ **DONE**
 
-- Steps: create a **new, private** repository under a new name (`trellis-v2` or similar); it is empty and unrelated to the old one.
-- **Blocker:** must be done by the account owner through the GitHub UI. This session's GitHub access is scoped to the contents of one repository and carries no account-level permissions — repository creation, renaming and visibility changes all return `403 Resource not accessible by integration`.
-- Notes: a session working in the new repository has to be started against it. This one cannot reach it.
+- `Hussain2111/trellis_v2` exists, is attached to the working session, and carries the Stage 1 and Stage 2 commits. The old repository was never touched.
+- Notes, kept because it will recur: repository creation, renaming and visibility changes return `403 Resource not accessible by integration` from a session scoped to one repository's contents. Those are account-level actions and stay with the owner.
 
-## Stage 1 — Walking skeleton, in production
+## Stage 1 — Walking skeleton, in production — **PARTLY DONE**
 
 Deploy to real infrastructure before any feature exists. Every genuine infrastructure bug in the last build surfaced within hours of first contact and **none were reachable from local tests or CI**.
 
-**Task 1.1 — Repository and CI**
+**Built and verified locally: 1.1, 1.4, 1.5.** The Supabase project also exists (1.2), reused from v1 and cleaned. **Outstanding: one migration command, and the Vercel deploy** — the deploy being exactly the "real infrastructure" half this stage exists for. Until it lands, the scheduler has been proven against `localhost` and not against a domain, which is a materially weaker claim.
+
+**Task 1.1 — Repository and CI** ✅ **DONE**
 
 - Steps: new **private** repo; Next app; ESLint/Prettier; CI running typecheck, lint, format, migrations and tests **against a real Postgres service container**.
 - Notes: real Postgres in CI caught driver-level bugs last time that no mock would have. Private is the deliberate choice (decision 2) — 2,000 free Actions minutes covers four light workflows several times over, so there is nothing to buy by publishing the source.
 
-**Task 1.2 — Supabase**
+**Task 1.2 — Supabase** ⚠️ **NEARLY DONE — one command left**
 
-- Steps: create project; take the **connection pooler** string (transaction mode); disable prepared statements; write the migration **script**; one `accounts` table; migrate.
+- **The project already exists.** The v1 project was reused, not replaced: dumped, `public` wiped, password reset. The pooler `DATABASE_URL` is in `.env`. **Do not create a second project.**
+- Done: pooler string (transaction mode), prepared statements disabled in `lib/db/client.ts`, the migration script, and the Stage 1 tables.
+- **Outstanding: run `npm run db:migrate` against the cleaned project.** That is the whole of what is left here.
 - Notes: pooler, not direct — serverless functions are short-lived and numerous. The direct hostname is IPv6-only on new projects and unreachable from some networks; a connection that hangs with no error is this.
 - Blocker: migrations run through the script, never pasted into the SQL editor — the editor autocommits per statement, so a guard aborting a destructive step raises _after_ the destruction committed.
 
-**Task 1.3 — Deploy to Vercel**
+**Task 1.3 — Deploy to Vercel** ⛔ **OUTSTANDING — owner**
 
-- Steps: import; set env vars **with all three environments ticked** and **not marked Sensitive**; deploy; **turn Deployment Protection off**; redeploy.
+- Steps: import `trellis_v2`; set env vars **with all three environments ticked** and **not marked Sensitive**; deploy; **turn Deployment Protection off**; redeploy.
 - Notes: Sensitive makes a variable write-only, so a failed save is indistinguishable from a successful one — the previous build is still stuck with unreadable values. Environment changes need a redeploy. Deployment Protection is on by default and 401s every webhook and scheduler; it can return if the project is recreated.
 
-**Task 1.4 — Scheduler, end to end**
+**Task 1.4 — Scheduler, end to end** ⚠️ **BUILT, NOT PROVEN**
 
-- Steps: `CRON_SECRET`; an authenticated no-op route; `keepalive` on Vercel cron; a GitHub Actions workflow with repo variable `APP_URL` and repo secret `CRON_SECRET`; watch it return 200.
-- Notes: `APP_URL` must be the **stable production domain**. Per-deployment URLs change every deploy and the scheduler silently no-ops.
+- Built: `CRON_SECRET` guard, `/api/cron/ping` (authenticated, touches nothing), `keepalive` on Vercel cron in `vercel.json`, and `.github/workflows/scheduler-check.yml`. Verified against a local production build — **401 unauthenticated, 401 with a wrong bearer, 200 with the right one**.
+- Outstanding: the same run against the live domain. Needs repo variable `APP_URL` and repo secret `CRON_SECRET`, and depends on 1.3.
+- Notes: `APP_URL` must be the **stable production domain**. Per-deployment URLs change every deploy and the scheduler silently no-ops. The workflow fails loudly on anything but a 200 — a scheduler that exits 0 on a 401 is one that has quietly stopped working.
 
-**Task 1.5 — The settings page**
+**Task 1.5 — The settings page** ✅ **DONE**
 
 - Steps: render **resolved** env values the running function sees; pinned API version; token scopes with all seven checked; last sync; today's model usage.
 - Notes: built first, not last. In the previous build this was more reliable than Vercel's own dashboard for confirming a variable change took effect, and it is the instrument panel for every debugging session after this one.
@@ -447,36 +580,55 @@ Deploy to real infrastructure before any feature exists. Every genuine infrastru
 
 Standalone scripts in `scripts/`, importing **nothing** from app code — a probe sharing the code under test can only confirm its own assumptions. Each field requested individually so one failure doesn't mask others. Each media type probed separately.
 
-**Task 2.1 — Token and scopes** — _mostly done already; this is re-verify and record_
+**Task 2.1 — Token and scopes** ✅ **DONE**
 
-- Already established and **unaffected by the repository rename** — the Meta app is a separate thing that still exists: the `trellis` app (`4365362137020369`), all seven scopes, the `Skincaring` Page (`223324307523350`), and `IG_USER_ID` `17841402326320043`.
-- Steps: confirm the long-lived token is still valid and still carries all seven scopes; record the values in the new repo's `.env.example` and setup doc; **do not re-run the Facebook Login flow unless the token has expired.**
-- Notes if it does need regenerating: Facebook Login flow, **not** "Instagram API with Instagram Login" — the latter issues a different token type and the resolution path doesn't exist on it. Resolution is user token → `/me/accounts` → Page id → `/{page-id}?fields=instagram_business_account` → `IG_USER_ID`. And without `business_management`, `/me/accounts` returns `{"data": []}` — empty, not an error, reading as "administers no Pages" rather than "token lacks a permission". Document that failure mode wherever scopes are listed and make the scope check test all seven.
+- The token was **regenerated** — the original was lost with the old working folder. `probe:graph` confirms it: valid, **56 days remaining, all seven scopes**.
+- Established: the `trellis` app (`4365362137020369`), the `Skincaring` Page (`223324307523350`), `IG_USER_ID` `17841402326320043`. The Meta app is independent of anything that happened to the repositories.
+- Notes, kept for the next regeneration: Facebook Login flow, **not** "Instagram API with Instagram Login" — the latter issues a different token type and the resolution path doesn't exist on it. Resolution is user token → `/me/accounts` → Page id → `/{page-id}?fields=instagram_business_account` → `IG_USER_ID`. And without `business_management`, `/me/accounts` returns `{"data": []}` — empty, not an error, reading as "administers no Pages" rather than "token lacks a permission". Document that failure mode wherever scopes are listed and make the scope check test all seven.
 
-**Task 2.2 — Media insights lookback (Q1)** ★
+**Task 2.2 — Media insights lookback (Q1)** ✅ **DONE — no boundary, 242/243, oldest 2021-06-04**
 
-- Steps: paginate the media edge; request insights at increasing post age, specifically around 6, 9 and 12 months; report the oldest post returning data and the first that doesn't.
-- Notes: **highest-value unknown.** Determines whether the chat reasons over most of the account's history or a handful of recent posts. A backfill task is conditional on the answer.
+**Task 2.3 — `follows_and_unfollows` (Q2)** ✅ **DONE — values returned; mapping unverified, see 2.7**
 
-**Task 2.3 — `follows_and_unfollows` (Q2)**
+**Task 2.4 — Account-insight backfill (Q3)** ⚠️ **PARTIAL — only `reach` was actually tested**
 
-- Steps: re-request over 30 days with explicit `since`/`until`.
-- Notes: decides whether the dashboard shows gross follows and unfollows or only net deltas. **Plan for both.**
+### Task 2.6 — Fix the probe and re-run Q3 properly ★ **next**
 
-**Task 2.4 — Account-insight backfill (Q3)**
+- **The bug:** `probeBackfill` in `scripts/probe/account-insights.ts` sends `metric` + `period` + window but **not** `metric_type=total_value`, so four of five metrics errored `(#100)` and only `reach` was tested.
+- **Steps:**
+  1. Send `metric_type=total_value` where required. **Fix the probe and any fixture in the same commit** — a fixture mirroring a wrong assumption manufactures confidence.
+  2. Re-run all five account metrics, plus `follower_count`, over **2, 7, 30, 90 and 365 days**. If account insights reach back further than 30 days, first sync populates proportionally more and the backfill scope grows again.
+  3. **Report, per metric, three things** — not just success or failure:
+     - **series or single total?** `reach` with `period=day` returned a 30-day series. `total_value` typically returns _one aggregate for the window_.
+     - **does a one-day window (`since` = `until`) yield a usable daily value?** This is the decisive one: it determines whether a per-day backfill is possible at all.
+     - how far back the window can be pushed before values stop.
+- **Why the shape question decides a table:** if those four metrics only support `total_value`, there is no daily series for them, and per-day values mean **one request per day** — 30 for a month, 365 for a year. Affordable at ~1% observed usage, but a different operation from the single windowed call `reach` supports. The schema question is therefore not only "which shape" but **whether `account_daily` can hold all five metrics per day at all, or whether four of them are window aggregates needing their own table.**
+- **Owner:** account owner — holds the token.
+- **Blocker:** Task 3.1 cannot be written until this returns.
 
-- Steps: request account insights with explicit `since`/`until` across a 30-day window.
-- Notes: the claim that account insights don't backfill is consistent with a _default_ request returning ~2 days, but the endpoint accepts an explicit range. If it serves retroactively, the follower chart is populated on day one instead of blank for a month. One request; materially changes first-run.
+### Task 2.7 — Verify the `FOLLOWER` / `NON_FOLLOWER` mapping ★
 
-**Task 2.5 — Fold findings in**
+- **Steps:** request `follower_count` as a series over the **same 30-day window**; take the net change end to end; compare against `FOLLOWER − NON_FOLLOWER` (here, `37 − 61 = −24`).
+- **Reading it:** the **sign** is what discriminates. If net change is ≈ −24, `FOLLOWER` means follows and `NON_FOLLOWER` means unfollows. If it is ≈ +24, the mapping is reversed. If it is neither, the dimensions mean something else entirely.
+- **Two caveats on the method:** if the net change happens to be near zero the test is **inconclusive**, and a longer window is needed. And window boundaries must match exactly — an off-by-one at either edge produces a small mismatch, so tolerate magnitude drift and judge on sign.
+- **If it cannot be confirmed:** the dashboard shows the metric **unlabelled or not at all**. It does not guess. A confidently inverted number under the word "unfollows" is precisely the failure mode this project is organised against.
+- **Record the verification and its result in `docs/graph-api.md`.** This is a semantic question about someone else's API and it will otherwise be forgotten and then re-guessed.
 
-- Steps: write `docs/graph-api.md` from probe output; set the pinned API version; **set the chat acceptance test** (decision 4).
-- Notes: when reality disagrees with documentation, code and fixture change in the same commit. A fixture mirroring a wrong assumption manufactures confidence.
-- Blocker: Stage 3 does not start until the acceptance test is written down.
+### Task 2.8 — Write `docs/graph-api.md`
+
+- **Steps:** write it from probe output, not from Meta's documentation. It must carry, at minimum:
+  - `metric_type=total_value` and exactly which metrics require it
+  - `follower_count` (metric, singular) vs `followers_count` (account field)
+  - the `media_count` 229-vs-243 discrepancy, and that **pagination exhaustion is the terminator**
+  - the checkpoint limitation: historical posts can hold only `latest`
+  - the `FOLLOWER`/`NON_FOLLOWER` verification and its outcome
+  - the pinned API version, and the version Meta actually served
+  - Meta error code `1` as transient, worth retrying
+- **Blocker:** Stage 3 does not start until this exists.
 
 ## Stage 3 — Foundation
 
-**Task 3.1** — Data model (**A1**). Blocker: Q1, Q2, Q3.
+**Task 3.1** — Data model (**A1**). **Blocker: Task 2.6 only** — the `account_daily` / `account_windows` shape. Q1 and Q2 are answered; the rest of the schema is unblocked.
 
 **Task 3.2 — Backups** ⛔ blocks 3.3
 
@@ -484,10 +636,11 @@ Standalone scripts in `scripts/`, importing **nothing** from app code — a prob
 - Notes: `account_daily` is the only data in this system that cannot be re-fetched from Meta. Everything else is a re-sync away. Supabase Free has no automated backups, so this workflow is the entire disaster-recovery story. **An untested backup is not a backup** — the restore is part of the task, not a follow-up.
 - **Blocker: this ships before the sync starts writing.** It sits ahead of 3.3 rather than at the end of the stage for one reason: the daily sync is what begins accumulating the irreplaceable table, and a backup added afterwards protects only the period after it. Backup first, then start collecting.
 
-**Task 3.3** — Sync layer (**A2**) + the Actions loop.
+**Task 3.3** — Sync layer (**A2**) + the Actions loop, **including the one-time backfill**.
 
-- Steps: rate-limit handling and the resumable cursor **first**, then account → media → insights → comments, each shipped and verified separately.
-- Notes: backoff and the 429 path are not a hardening pass at the end. The first full walk of 228 posts is the largest burst the app will make and it happens on day one of this task.
+- Steps: rate-limit handling and the resumable cursor **first**, then account → media → insights → comments, each shipped and verified separately, then the backfill as an explicit first-run mode.
+- The backfill is not a side effect of the daily sync. It runs once, guarded by a flag or by `post_insights` being empty; it writes `latest` only; it reuses the same cursor and per-run budget; it is deliberately throttled; and it retries Meta error code `1` before writing `unavailable`.
+- Notes: backoff and the 429 path are not a hardening pass at the end. The full walk of 243 posts plus the backfill is the largest burst the app will make and it happens on day one of this task. Measured headroom is ~1% of the hourly allowance, which makes it affordable — not a reason to drop the guards.
 - Blocker: 3.2. Also — the first sync must be run and watched, not fired and assumed. Meta's usage headers go into `sync_runs.stats` and onto the settings page in the same task.
 
 **Task 3.4** — Provider interface (**A4**).
@@ -521,14 +674,23 @@ Per **B3**. `lib/time.ts` and its boundary test come first.
 
 # PART D — OPEN QUESTIONS
 
-| #                                                                                                                                                                                                                                                                                                                                                                   | Question                                             | Resolution method                                      | Owner                           | What changes on the answer                                                                                                     |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------ | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| **Q1** ★                                                                                                                                                                                                                                                                                                                                                            | How far back do media insights reach?                | Probe posts at 6, 9, 12 months (Task 2.2)              | Account owner — holds the token | Whether the chat reasons over most of the account's history or a few recent posts. A conditional backfill task.                |
-| **Q2**                                                                                                                                                                                                                                                                                                                                                              | Does `follows_and_unfollows` return values?          | Re-request over 30 days (Task 2.3)                     | Account owner                   | Gross follows/unfollows on the dashboard, or net deltas only. `account_daily` column shape.                                    |
-| **Q3**                                                                                                                                                                                                                                                                                                                                                              | Do account insights backfill with an explicit range? | Request with `since`/`until` across 30 days (Task 2.4) | Account owner                   | Whether the follower chart is populated on day one or blank for a month.                                                       |
-| **Q4**                                                                                                                                                                                                                                                                                                                                                              | What is the chat's acceptance test?                  | Set in Task 2.5, once Q1–Q3 are known                  | Both                            | Whether Stage 4 can close.                                                                                                     |
-| **Q5**                                                                                                                                                                                                                                                                                                                                                              | What are the current free-tier quota limits?         | Read live from AI Studio; record with date             | Account owner                   | Rationing caps. **Never hardcode a number from a blog** — limits were cut in late 2025 and are no longer published statically. |
-| **Resolved, kept for the record:** _is `shortcode` present on every media type?_ Probe output shows it present on **both** the carousel and the reel — the two types this account actually posts. Images remain unprobed only because none exist to probe. Treat `shortcode` as available; the join key holds. If an image is ever published, confirm it once then. |
+Q1, Q2 and Q4 are answered. What remains is one shape question that blocks the
+schema, one range question, and one semantic question about someone else's API.
+
+| #         | Question                                                                                                                                                                                                      | Resolution method                                                                                                                                | Owner         | What changes on the answer                                                                                                                                    |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Q3a** ★ | Do `views`, `profile_views`, `accounts_engaged` and `total_interactions` return a **per-day series** or a **single window total** — and does a one-day window (`since` = `until`) yield a usable daily value? | Task 2.6 — re-run with `metric_type=total_value` over 2/7/30/90/365 days                                                                         | Account owner | **Whether `account_daily` can hold all five metrics per day at all**, or whether four of them are window aggregates needing their own table. Blocks Task 3.1. |
+| **Q3b**   | How far back do account insights reach — is 30 days the ceiling, or do 90 and 365 also return?                                                                                                                | Task 2.6                                                                                                                                         | Account owner | How much history the first sync populates, and how deep the backup requirement really is.                                                                     |
+| **Q2a** ★ | Do `FOLLOWER` / `NON_FOLLOWER` mean follows / unfollows, or something else?                                                                                                                                   | Task 2.7 — compare `FOLLOWER − NON_FOLLOWER` (−24) against the net change in the `follower_count` series over the same window; **judge on sign** | Account owner | Whether the dashboard can label these at all. If unconfirmed it shows the metric unlabelled or not at all — it does **not** guess.                            |
+| **Q5**    | What are the current free-tier quota limits?                                                                                                                                                                  | Read live from AI Studio; record with date                                                                                                       | Account owner | Rationing caps. **Never hardcode a number from a blog** — limits were cut in late 2025 and are no longer published statically.                                |
+
+### Resolved, kept for the record
+
+- **Q1 — how far back do media insights reach?** No boundary. 242/243 posts, oldest 2021-06-04, 1,907 days. The sparse-dashboard premise is dead and a backfill is mandatory.
+- **Q2 — does `follows_and_unfollows` return values?** Yes, with `metric_type=total_value` **and** `breakdown=follow_type`. The remaining question is semantic, not existential — see Q2a.
+- **Q4 — what is the chat's acceptance test?** Set. Answer-and-refuse in one turn; see **B1**.
+- **Is `shortcode` present on every media type?** Present across the types this account posts. The join key holds.
+- **Is `thumbnail_url` universally present?** No — type-conditional, `VIDEO/REELS` only. Confirmed, and the probe now labels it correctly rather than reporting a false absence.
 
 ---
 
@@ -542,7 +704,7 @@ How each stage is proven, not assumed.
 | 1     | Vercel deploy green · Supabase migration applied through the script · **GitHub Actions run returns 200 from the authenticated route** · settings page shows correct resolved values · Deployment Protection confirmed off                                                                                                                                                                                                                                                                                |
 | 2     | Each probe prints a reconciliation table. **Findings sent back as the terminal table, never the JSON — it contains real account data.** `docs/graph-api.md` written from output, not from Meta's docs.                                                                                                                                                                                                                                                                                                   |
 | 3     | Migrations reversible on a scratch database seeded through the script. Sync run twice → identical row counts (idempotent). A deliberately failed metric writes `null` with a reason, never `0`. **The first full sync watched end to end**, with Meta's usage headers observed and a rate-limited interruption confirmed to resume from its cursor rather than restart. **One backup dump restored into a scratch database and `account_daily` read back from it** — an untested backup is not a backup. |
-| 4     | The Stage 2 acceptance test, answered from real rows, checked by hand against the database. Plus three questions designed to make it lie: a format comparison it must decline, a period beyond the insights boundary, and a question about data it doesn't have.                                                                                                                                                                                                                                         |
+| 4     | **The acceptance test in B1**, graded twice — once at the start of the stage, and again a week or two later once post-go-live posts have real curves, when it must split the set rather than refuse wholesale. Every figure checked by hand against the database. Plus questions designed to make it lie: a comparison whose sample floor genuinely is not met (rarer now, so it must be constructed), a checkpoint that was never sampled, and a question about data it does not have.                  |
 | 5     | A fake model returning six cards, two with invented numbers → four render. First real batch read by hand for usefulness.                                                                                                                                                                                                                                                                                                                                                                                 |
 | 6     | An entry at `…T22:00:00Z` renders Monday 01:00 and files into the Monday week. Copy→paste→post performed end to end **on a phone**.                                                                                                                                                                                                                                                                                                                                                                      |
 
