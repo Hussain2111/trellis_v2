@@ -79,6 +79,36 @@ shape everything else:
 - **30 days is a per-request range cap, not a horizon.** History is walked by
   paging backwards in 30-day windows.
 
+## First run
+
+Once, in order. Each step tells you whether the next one can work.
+
+```bash
+git pull
+npm install
+npm run setup:account      # verifies the token, creates the account row
+```
+
+`setup:account` is the first thing that touches the real Graph API and the real
+database together, so it doubles as a first-contact check — a wrong token, a
+short scope list or a `DATABASE_URL` pointing somewhere unexpected all surface
+here rather than part-way through a 243-post walk. It is safe to re-run.
+
+It also prints today's `followers_count` in a box. **Write that number down** —
+it starts the seven-day check that decides whether follows/unfollows can be
+labelled at all.
+
+Then, on GitHub: **Actions → Sync → Run workflow**.
+
+It calls `/api/sync` repeatedly until the response says `"done":true`. Each
+call does a bounded amount of work and returns; the runner calls it back. Expect
+several iterations — the one-time backfill walks 243 posts and is deliberately
+unhurried. Watch the `stats` in each iteration's output: they carry request
+counts and Meta's own rate-limit usage.
+
+If it hits the iteration cap without finishing, that is not a failure. The
+cursor is stored and the next run resumes from it.
+
 ## Scheduling
 
 Vercel Hobby cron allows **2 entries, once daily each** — a cap, not a rate.

@@ -18,7 +18,8 @@
     "db:studio": "drizzle-kit studio",
     "probe:graph": "tsx scripts/probe/graph.ts",
     "probe:lookback": "tsx scripts/probe/insights-lookback.ts",
-    "probe:account-insights": "tsx scripts/probe/account-insights.ts"
+    "probe:account-insights": "tsx scripts/probe/account-insights.ts",
+    "setup:account": "tsx scripts/bootstrap-account.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.50",
