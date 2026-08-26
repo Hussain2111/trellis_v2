@@ -133,6 +133,37 @@ describe('media sync', () => {
     expect(await db().select().from(posts).where(eq(posts.accountId, accountId))).toHaveLength(2);
   });
 
+  it('stops at posts it already holds instead of re-walking the whole edge', async () => {
+    // THE REGRESSION. beginRun only resumes a run still marked `running`, so a
+    // COMPLETED walk means the next tick starts a fresh one at cursor null and
+    // reads the entire edge again. In production that ran twelve times in a
+    // row at ~95 posts each, ate the request budget, and starved the backfill
+    // behind it — the sync spent 35 minutes making almost no progress.
+    let pagesServed = 0;
+    __setGraphFetchForTests(async () => {
+      pagesServed += 1;
+      return reply({
+        data: [
+          { id: 'm1', shortcode: 'A' },
+          { id: 'm2', shortcode: 'B' },
+        ],
+        paging: { cursors: { after: 'C1' }, next: 'https://…' },
+      });
+    });
+
+    // First walk: everything is new, so it follows the cursor.
+    await syncMedia(accountId, 'IG1', new RunBudget({ maxRequests: 3 }));
+    const firstPass = pagesServed;
+    expect(firstPass).toBeGreaterThan(1);
+
+    // Second walk: page one is entirely known, so it stops there.
+    pagesServed = 0;
+    const second = await syncMedia(accountId, 'IG1', new RunBudget());
+    expect(second.done).toBe(true);
+    expect(pagesServed).toBe(1);
+    expect(second.stats.stoppedAt).toBe('known posts');
+  });
+
   it('hands back an unfinished walk with its cursor instead of restarting', async () => {
     __setGraphFetchForTests(async () =>
       reply({
