@@ -17,13 +17,33 @@ Cloud-hosted on **Vercel** and **Supabase**, at $0/month.
 
 ## Where this is
 
-**Deployed, with the data layer built.** The app is live on Vercel against a
-real Supabase project, the scheduler runs from GitHub Actions against the
-production domain, the schema is applied, and the Graph client and sync layer
-are written and tested.
+**The chat works.** It reads 246 posts going back to June 2021, with per-post
+performance on every one of them, plus account metrics over 696 days.
 
-**Not yet built: the three surfaces.** Chat, the dashboard's insight cards, and
-the calendar are all still empty states.
+**Not yet built:** the dashboard's insight cards and the calendar.
+
+## The chat
+
+Ask it about your account. It answers from your own data, or it doesn't answer.
+
+The mechanism rather than the promise:
+
+1. **Every statistic is computed in SQL** (`lib/chat/queries.ts`). The model
+   never does arithmetic — it asks for a median and is given one.
+2. **The tools are pre-computed aggregates**, never a query runner. The model
+   chooses what to fetch, not how it is calculated.
+3. **The answer is buffered, validated, then rendered.** Every figure in it must
+   appear in what a tool actually returned that turn. One that does not is
+   **dropped**, not caveated — a wrong number with a hedge in front of it is
+   still a wrong number. That is also why it does not stream: you cannot un-send
+   a token.
+4. **Refusal is a first-class path.** Ask it to compare formats where one has
+   too few measured posts and it says so, rather than comparing them anyway.
+
+The distinction it is built around: a post published before measurement began
+has **no** 24-hour or 48-hour reading. That is not zero, and it is not "too
+new" — nobody measured at that age and nobody can now. Keeping those three
+apart is the job.
 
 The full plan is in [`docs/plan.md`](docs/plan.md) — foundation, three surface
 lifecycles, a staged roadmap, and an open-questions register. The written record
