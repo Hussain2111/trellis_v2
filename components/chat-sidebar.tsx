@@ -58,7 +58,7 @@ export function ChatSidebar({ threads, activeId }: { threads: ThreadSummary[]; a
         type="button"
         onClick={() => void newChat()}
         disabled={busy}
-        className="flex items-center justify-center gap-2 rounded-xl border border-[--color-rule] bg-[--color-card] px-3 py-2.5 text-sm font-medium transition-colors hover:border-[--color-accent] disabled:opacity-50"
+        className="flex items-center justify-center gap-2 rounded-xl border border-rule bg-card px-3 py-2.5 text-sm font-medium transition-colors hover:border-accent disabled:opacity-50"
       >
         <PlusIcon className="size-4" />
         New chat
@@ -72,25 +72,21 @@ export function ChatSidebar({ threads, activeId }: { threads: ThreadSummary[]; a
               <Link
                 href={`/chat?thread=${thread.id}`}
                 className={`block rounded-lg py-2 pl-3 pr-9 text-sm transition-colors ${
-                  active
-                    ? 'bg-[--color-accent-soft] text-[--color-ink]'
-                    : 'text-[--color-ink-muted] hover:bg-[--color-paper-sunk]'
+                  active ? 'bg-accent-soft text-ink' : 'text-ink-muted hover:bg-paper-sunk'
                 }`}
               >
                 <span className="block truncate">
                   {thread.fromNote ? '📌 ' : ''}
                   {thread.title ?? 'New chat'}
                 </span>
-                <span className="mt-0.5 block text-xs text-[--color-ink-faint]">
-                  {thread.updatedLabel}
-                </span>
+                <span className="mt-0.5 block text-xs text-ink-faint">{thread.updatedLabel}</span>
               </Link>
               <button
                 type="button"
                 onClick={() => void remove(thread.id)}
                 disabled={busy}
                 aria-label={`Delete ${thread.title ?? 'this chat'}`}
-                className="absolute right-1.5 top-2 rounded-md p-1.5 text-[--color-ink-faint] opacity-0 transition-opacity hover:text-[--color-negative] focus-visible:opacity-100 group-hover:opacity-100"
+                className="absolute right-1.5 top-2 rounded-md p-1.5 text-ink-faint opacity-0 transition-opacity hover:text-negative focus-visible:opacity-100 group-hover:opacity-100"
               >
                 <TrashIcon className="size-4" />
               </button>

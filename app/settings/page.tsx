@@ -73,7 +73,7 @@ export default async function SettingsPage() {
     <main className="space-y-8">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-        <p className="mt-1 text-sm text-[--color-ink-muted]">
+        <p className="mt-1 text-sm text-ink-muted">
           What this deployment actually resolved — not what a dashboard says it should have.
         </p>
       </header>
@@ -83,7 +83,7 @@ export default async function SettingsPage() {
           title="Database"
           aside={<Badge tone={database.ok ? 'good' : 'bad'}>{database.ok ? 'ok' : 'error'}</Badge>}
         />
-        <dl className="divide-y divide-[--color-rule]">
+        <dl className="divide-y divide-rule">
           <Row label="Connection" value={database.detail} />
           <Row
             label="Last keepalive write"
@@ -94,7 +94,7 @@ export default async function SettingsPage() {
 
       <Panel>
         <PanelHeader title="Configuration" />
-        <dl className="divide-y divide-[--color-rule]">
+        <dl className="divide-y divide-rule">
           {rows.map((row) => (
             <Row key={row.label} label={row.label} value={row.value} tone={row.tone} />
           ))}
@@ -106,12 +106,12 @@ export default async function SettingsPage() {
           title="Token scopes"
           aside={`${REQUIRED_SCOPES.length} required · ${ALL_SCOPES.length} requested`}
         />
-        <div className="px-5 py-3 text-xs text-[--color-ink-faint]">
+        <div className="px-5 py-3 text-xs text-ink-faint">
           Live scope checking arrives with the Graph client. Until then this is the list a token
           must be generated with — <span className="font-mono">business_management</span> included,
           whose absence returns an empty Page list rather than an error.
         </div>
-        <dl className="divide-y divide-[--color-rule]">
+        <dl className="divide-y divide-rule">
           {ALL_SCOPES.map((scope) => (
             <Row key={scope} label={scope} value={SCOPE_PURPOSE[scope] ?? ''} mono />
           ))}
@@ -134,14 +134,8 @@ function Row({
 }) {
   return (
     <div className="flex items-baseline justify-between gap-4 px-5 py-3">
-      <dt className={`text-sm text-[--color-ink-muted] ${mono ? 'font-mono text-xs' : ''}`}>
-        {label}
-      </dt>
-      <dd
-        className={`text-right text-sm ${
-          tone === 'bad' ? 'text-[--color-negative]' : 'text-[--color-ink]'
-        }`}
-      >
+      <dt className={`text-sm text-ink-muted ${mono ? 'font-mono text-xs' : ''}`}>{label}</dt>
+      <dd className={`text-right text-sm ${tone === 'bad' ? 'text-negative' : 'text-ink'}`}>
         {value}
       </dd>
     </div>

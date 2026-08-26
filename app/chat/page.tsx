@@ -34,7 +34,13 @@ export default async function ChatPage({
   const params = await searchParams;
   const requested = params.thread ? Number(params.thread) : null;
 
-  const threads = await listThreads(accountId);
+  // The thread list and the requested thread's messages do not depend on each
+  // other, so they go together rather than one after the other. Two sequential
+  // round trips is one more than this page needs.
+  const [threads, requestedHistory] = await Promise.all([
+    listThreads(accountId),
+    requested ? threadMessages(requested) : Promise.resolve(null),
+  ]);
 
   // A requested thread must belong to this account; anything else falls back to
   // the most recent one. Visiting /chat never creates a thread unless there are
@@ -51,7 +57,10 @@ export default async function ChatPage({
   }
   thread ??= threads[0] ?? (await createThread(accountId));
 
-  const history = await threadMessages(thread.id);
+  const history =
+    requestedHistory && thread.id === requested
+      ? requestedHistory
+      : await threadMessages(thread.id);
 
   const summaries: ThreadSummary[] = (
     threads.some((t) => t.id === thread.id) ? threads : [thread, ...threads]
@@ -73,16 +82,21 @@ export default async function ChatPage({
           <ChatSidebar threads={summaries} activeId={thread.id} />
         </aside>
 
-        <details className="mb-4 rounded-xl border border-[--color-rule] bg-[--color-card] px-4 py-3 lg:hidden">
+        <details className="mb-4 rounded-xl border border-rule bg-card px-4 py-3 lg:hidden">
           <summary className="cursor-pointer text-sm font-medium">
-            Chats <span className="text-[--color-ink-faint]">({summaries.length})</span>
+            Chats <span className="text-ink-faint">({summaries.length})</span>
           </summary>
           <div className="mt-3">
             <ChatSidebar threads={summaries} activeId={thread.id} />
           </div>
         </details>
 
+        {/* Keyed on the thread, and it has to be. The panel seeds its state
+            from `initial` with useState, which only reads on mount — without a
+            key React reuses the same instance across a thread switch and the
+            previous conversation stays on screen while the URL says otherwise. */}
         <ChatPanel
+          key={thread.id}
           threadId={thread.id}
           initial={history.map((m) => ({
             role: m.role as 'user' | 'assistant',
@@ -99,7 +113,7 @@ function Header() {
   return (
     <header>
       <h1 className="text-2xl font-semibold tracking-tight">Chat</h1>
-      <p className="mt-1 text-sm text-[--color-ink-muted]">
+      <p className="mt-1 text-sm text-ink-muted">
         Ask about your own account. Every number comes from your data, or it doesn&rsquo;t get said.
       </p>
     </header>

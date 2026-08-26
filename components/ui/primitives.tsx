@@ -9,18 +9,14 @@ import type { ReactNode } from 'react';
  */
 
 export function Panel({ children }: { children: ReactNode }) {
-  return (
-    <section className="rounded-xl border border-[--color-rule] bg-[--color-card] shadow-sm">
-      {children}
-    </section>
-  );
+  return <section className="rounded-xl border border-rule bg-card shadow-sm">{children}</section>;
 }
 
 export function PanelHeader({ title, aside }: { title: string; aside?: ReactNode }) {
   return (
-    <header className="flex items-baseline justify-between gap-3 border-b border-[--color-rule] px-5 py-4">
+    <header className="flex items-baseline justify-between gap-3 border-b border-rule px-5 py-4">
       <h2 className="text-base font-semibold">{title}</h2>
-      {aside ? <div className="text-xs text-[--color-ink-faint]">{aside}</div> : null}
+      {aside ? <div className="text-xs text-ink-faint">{aside}</div> : null}
     </header>
   );
 }
@@ -28,10 +24,8 @@ export function PanelHeader({ title, aside }: { title: string; aside?: ReactNode
 export function EmptyState({ title, children }: { title: string; children?: ReactNode }) {
   return (
     <div className="px-5 py-10 text-center">
-      <p className="text-sm font-medium text-[--color-ink-muted]">{title}</p>
-      {children ? (
-        <p className="mx-auto mt-2 max-w-sm text-sm text-[--color-ink-faint]">{children}</p>
-      ) : null}
+      <p className="text-sm font-medium text-ink-muted">{title}</p>
+      {children ? <p className="mx-auto mt-2 max-w-sm text-sm text-ink-faint">{children}</p> : null}
     </div>
   );
 }
@@ -42,52 +36,59 @@ export function EmptyState({ title, children }: { title: string; children?: Reac
  * `value === null` renders an em dash and, on request, why. It never renders 0
  * for an unknown — summing an empty series gives 0, which reads as "you held
  * steady", a different and false claim.
+ *
+ * Numbers are grouped (4,876 rather than 4876). At a glance 4876 and 48765 are
+ * the same shape, and this is read at a glance.
  */
 export function Stat({
   label,
   value,
   unknownReason,
-  sample,
+  note,
+  marked,
 }: {
   label: string;
   value: number | string | null;
   unknownReason?: string;
-  sample?: { total: number; measured: number };
+  /** A short qualifier — a sample size, a comparison. Shown only when it says something. */
+  note?: string;
+  /** Ties the figure to a footnote below the group rather than repeating the caveat on each. */
+  marked?: boolean;
 }) {
   const known = value !== null && value !== undefined;
   return (
     <div className="px-5 py-4">
-      <div className="text-xs uppercase tracking-wide text-[--color-ink-faint]">{label}</div>
+      <div className="text-xs uppercase tracking-wide text-ink-faint">
+        {label}
+        {marked ? <span className="text-accent"> *</span> : null}
+      </div>
       <div className="tabular mt-1 text-2xl font-semibold">
-        {known ? value : <span className="text-[--color-ink-faint]">—</span>}
+        {known ? format(value) : <span className="text-ink-faint">—</span>}
       </div>
       {!known && unknownReason ? (
-        <div className="mt-1 text-xs text-[--color-ink-faint]">{unknownReason}</div>
+        <div className="mt-1 text-xs text-ink-faint">{unknownReason}</div>
       ) : null}
-      {known && sample ? <SampleNote {...sample} /> : null}
+      {known && note ? <div className="mt-1 text-xs text-ink-faint">{note}</div> : null}
     </div>
   );
 }
 
+function format(value: number | string): string {
+  return typeof value === 'number' ? value.toLocaleString('en-US') : value;
+}
+
 /**
- * Every median or aggregate declares its real sample size. `17 posts (2
- * measured)`, never `17 posts` — the population count is not the sample the
- * figure was computed from, and conflating them overstates the claim.
+ * Every aggregate declares its real sample size — but only where the sample is
+ * not the whole window. Repeating "30 of 30 days" under five figures in a row
+ * is noise that trains the eye to skip the one that reads "25 of 30".
  */
-export function SampleNote({ total, measured }: { total: number; measured: number }) {
-  if (measured === total) {
-    return (
-      <div className="mt-1 text-xs text-[--color-ink-faint]">
-        {total} {total === 1 ? 'post' : 'posts'}
-      </div>
-    );
-  }
-  return (
-    <div className="mt-1 text-xs text-[--color-ink-faint]">
-      {total} {total === 1 ? 'post' : 'posts'}{' '}
-      <span className="text-[--color-accent]">({measured} measured)</span>
-    </div>
-  );
+export function sampleNote(
+  measured: number,
+  total: number,
+  unit: 'day' | 'post',
+): string | undefined {
+  if (total === 0 || measured === total) return undefined;
+  return `${measured} of ${total} ${unit}s measured`;
 }
 
 export function Badge({
@@ -98,9 +99,9 @@ export function Badge({
   tone?: 'neutral' | 'good' | 'bad';
 }) {
   const tones = {
-    neutral: 'bg-[--color-paper-sunk] text-[--color-ink-muted]',
-    good: 'bg-[--color-accent-soft] text-[--color-ink]',
-    bad: 'bg-[--color-accent-soft] text-[--color-negative]',
+    neutral: 'bg-paper-sunk text-ink-muted',
+    good: 'bg-accent-soft text-ink',
+    bad: 'bg-accent-soft text-negative',
   } as const;
   return (
     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${tones[tone]}`}>

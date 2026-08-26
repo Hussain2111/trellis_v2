@@ -74,9 +74,9 @@ export function ChatPanel({
     <div className="flex min-h-[60vh] flex-col">
       <div className="flex-1 space-y-4">
         {messages.length === 0 ? (
-          <div className="rounded-xl border border-[--color-rule] bg-[--color-card] px-5 py-8 text-center">
-            <p className="text-sm font-medium text-[--color-ink-muted]">Ask about your account</p>
-            <p className="mx-auto mt-2 max-w-md text-sm text-[--color-ink-faint]">
+          <div className="rounded-xl border border-rule bg-card px-5 py-8 text-center">
+            <p className="text-sm font-medium text-ink-muted">Ask about your account</p>
+            <p className="mx-auto mt-2 max-w-md text-sm text-ink-faint">
               {fromNote
                 ? 'Ask about the note above — it will look up what that note was based on.'
                 : 'Every number comes from your own data or it doesn’t get said.'}
@@ -91,9 +91,7 @@ export function ChatPanel({
           >
             <div
               className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                message.role === 'user'
-                  ? 'bg-[--color-accent-soft] text-[--color-ink]'
-                  : 'border border-[--color-rule] bg-[--color-card]'
+                message.role === 'user' ? 'bg-accent-soft text-ink' : 'border border-rule bg-card'
               }`}
             >
               {message.role === 'assistant' ? (
@@ -102,7 +100,7 @@ export function ChatPanel({
                 <p className="whitespace-pre-wrap">{message.content}</p>
               )}
               {message.dropped ? (
-                <p className="mt-2 border-t border-[--color-rule] pt-2 text-xs text-[--color-ink-faint]">
+                <p className="mt-2 border-t border-rule pt-2 text-xs text-ink-faint">
                   {message.dropped} line{message.dropped === 1 ? '' : 's'} removed — they stated
                   figures that weren&rsquo;t in what the queries returned, and this app drops those
                   rather than showing them.
@@ -114,14 +112,14 @@ export function ChatPanel({
 
         {pending ? (
           <div className="flex justify-start">
-            <div className="rounded-2xl border border-[--color-rule] bg-[--color-card] px-4 py-3 text-sm text-[--color-ink-faint]">
+            <div className="rounded-2xl border border-rule bg-card px-4 py-3 text-sm text-ink-faint">
               Checking your data…
             </div>
           </div>
         ) : null}
 
         {error ? (
-          <div className="rounded-xl border border-[--color-rule] bg-[--color-card] px-4 py-3 text-sm text-[--color-negative]">
+          <div className="rounded-xl border border-rule bg-card px-4 py-3 text-sm text-negative">
             {error}
           </div>
         ) : null}
@@ -140,12 +138,12 @@ export function ChatPanel({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Ask about your posts…"
-          className="flex-1 rounded-full border border-[--color-rule] bg-[--color-card] px-5 py-3 text-sm outline-none focus:border-[--color-accent]"
+          className="flex-1 rounded-full border border-rule bg-card px-5 py-3 text-sm outline-none focus:border-accent"
         />
         <button
           type="submit"
           disabled={pending || input.trim().length === 0}
-          className="rounded-full bg-[--color-accent] px-5 py-3 text-sm font-medium text-white disabled:opacity-40"
+          className="rounded-full bg-accent px-5 py-3 text-sm font-medium text-white disabled:opacity-40"
         >
           Ask
         </button>

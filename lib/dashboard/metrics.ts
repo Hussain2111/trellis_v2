@@ -64,7 +64,8 @@ export interface MetricSummary {
 }
 
 const WINDOW_METRICS: [column: string, label: string, unstable: boolean][] = [
-  ['reach', 'Accounts reached', false],
+  // Reach is a typical day, not a total, so its label says so.
+  ['reach', 'Accounts reached, typical day', false],
   ['views', 'Views', true],
   ['profile_views', 'Profile visits', false],
   ['accounts_engaged', 'Accounts engaged', true],
@@ -72,39 +73,49 @@ const WINDOW_METRICS: [column: string, label: string, unstable: boolean][] = [
 ];
 
 /**
- * Recent totals per metric.
+ * Recent totals per metric, in ONE round trip.
  *
- * `reach` is deliberately absent from the summed figures — it counts unique
- * accounts, so adding daily values over-counts anyone reached twice. It gets a
- * median instead, which is a statement the data can support.
+ * This ran a query per metric in a loop — five sequential round trips to a
+ * database on the other side of the internet, for five numbers over the same
+ * thirty rows. They are now one pass over one window.
+ *
+ * `reach` is deliberately not summed. It counts unique accounts, so adding
+ * daily values over-counts anyone reached twice; it gets a median day instead,
+ * which is a statement the data can support.
  */
 export async function recentTotals(accountId: number, days = 30): Promise<MetricSummary[]> {
-  const out: MetricSummary[] = [];
+  const [row] = await rows<Record<string, number | null>>(sql`
+    select
+      count(*)::int as days,
+      percentile_cont(0.5) within group (order by reach)::int as reach,
+      count(reach)::int as reach_measured,
+      sum(views)::int as views,
+      count(views)::int as views_measured,
+      sum(profile_views)::int as profile_views,
+      count(profile_views)::int as profile_views_measured,
+      sum(accounts_engaged)::int as accounts_engaged,
+      count(accounts_engaged)::int as accounts_engaged_measured,
+      sum(total_interactions)::int as total_interactions,
+      count(total_interactions)::int as total_interactions_measured
+    from (
+      select * from account_daily
+      where account_id = ${accountId}
+      order by day desc limit ${days}
+    ) recent
+  `);
 
-  for (const [column, label, unstable] of WINDOW_METRICS) {
-    const [row] = await rows<{ total: number | null; measured: number; days: number }>(sql`
-      select
-        ${column === 'reach' ? sql`percentile_cont(0.5) within group (order by reach)::int` : sql.raw(`sum(${column})::int`)} as total,
-        count(${sql.raw(column)})::int as measured,
-        count(*)::int as days
-      from (
-        select * from account_daily
-        where account_id = ${accountId}
-        order by day desc limit ${days}
-      ) recent
-    `);
-
-    out.push({
+  return WINDOW_METRICS.map(([column, label, unstable]) => {
+    const measured = Number(row?.[`${column}_measured`] ?? 0);
+    return {
       metric: column,
-      label: column === 'reach' ? 'Accounts reached (median day)' : label,
-      total: row?.measured ? (row?.total ?? null) : null,
-      days: row?.days ?? 0,
-      measured: row?.measured ?? 0,
+      label,
+      // A sum over zero measured days is 0, and 0 is a claim. Blank instead.
+      total: measured > 0 ? (row?.[column] ?? null) : null,
+      days: Number(row?.days ?? 0),
+      measured,
       unstable,
-    });
-  }
-
-  return out;
+    };
+  });
 }
 
 export async function followsSummary(accountId: number, days = 30) {

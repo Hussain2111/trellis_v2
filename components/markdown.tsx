@@ -67,7 +67,7 @@ function renderBlocks(text: string): ReactNode[] {
       if (block.kind === 'heading') {
         const Tag = block.level === 3 ? 'h3' : 'h4';
         return (
-          <Tag key={i} className="text-sm font-semibold text-[--color-ink]">
+          <Tag key={i} className="text-sm font-semibold text-ink">
             {inline(block.lines[0]!)}
           </Tag>
         );
@@ -77,7 +77,7 @@ function renderBlocks(text: string): ReactNode[] {
         return (
           <Tag
             key={i}
-            className={`space-y-1.5 pl-5 ${block.kind === 'ul' ? 'list-disc' : 'list-decimal'} marker:text-[--color-ink-faint]`}
+            className={`space-y-1.5 pl-5 ${block.kind === 'ul' ? 'list-disc' : 'list-decimal'} marker:text-ink-faint`}
           >
             {block.lines.map((line, j) => (
               <li key={j}>{inline(line)}</li>
@@ -126,7 +126,7 @@ function ExternalLink({ href, label }: { href: string; label: string }) {
       href={href}
       target="_blank"
       rel="noreferrer noopener"
-      className="inline-flex items-center rounded-full bg-[--color-accent-soft] px-2 py-0.5 text-xs font-medium text-[--color-ink] no-underline"
+      className="inline-flex items-center rounded-full bg-accent-soft px-2 py-0.5 text-xs font-medium text-ink no-underline"
     >
       {label} ↗
     </a>

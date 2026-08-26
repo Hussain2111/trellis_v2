@@ -37,6 +37,7 @@ export function renderChatSystem(v: ChatSystemVars): string {
     '',
     'HOW YOU NAME A POST:',
     '- NEVER by its id. "Post 94" is a row number in a database they have never seen and cannot look up. It tells them nothing.',
+    '- The same goes for a dashboard note. Say "the note you opened" or what it was about, never "note 1".',
     '- Name it by when it went up and what it was about, and give the link: "your 15 March carousel on double cleansing (link)".',
     '- Whenever you list posts, each line needs the date, what it was about, the figure, and the permalink. A list of bare numbers is not an answer.',
     '',

@@ -33,10 +33,10 @@ export interface Entry {
 }
 
 const STATE_DOT: Record<Entry['state'], string> = {
-  planned: 'bg-[--color-ink-faint]',
-  due: 'bg-[--color-accent]',
-  overdue: 'bg-[--color-negative]',
-  published: 'bg-[--color-positive]',
+  planned: 'bg-ink-faint',
+  due: 'bg-accent',
+  overdue: 'bg-negative',
+  published: 'bg-positive',
 };
 
 const STATE_LABELS: Record<Entry['state'], string> = {
@@ -82,7 +82,7 @@ export function MonthCalendar({
           <button
             type="button"
             onClick={() => setMonth(todayKey.slice(0, 7))}
-            className="rounded-lg border border-[--color-rule] px-3 py-1.5 text-xs font-medium text-[--color-ink-muted] hover:text-[--color-ink]"
+            className="rounded-lg border border-rule px-3 py-1.5 text-xs font-medium text-ink-muted hover:text-ink"
           >
             Today
           </button>
@@ -92,12 +92,12 @@ export function MonthCalendar({
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-[--color-rule] bg-[--color-card]">
-        <div className="grid grid-cols-7 border-b border-[--color-rule]">
+      <div className="overflow-hidden rounded-xl border border-rule bg-card">
+        <div className="grid grid-cols-7 border-b border-rule">
           {WEEKDAYS.map((day) => (
             <div
               key={day}
-              className="px-2 py-2 text-center text-[11px] font-semibold uppercase tracking-wide text-[--color-ink-faint]"
+              className="px-2 py-2 text-center text-[11px] font-semibold uppercase tracking-wide text-ink-faint"
             >
               <span className="hidden sm:inline">{day}</span>
               <span className="sm:hidden">{day[0]}</span>
@@ -114,18 +114,18 @@ export function MonthCalendar({
             return (
               <div
                 key={day}
-                className={`group relative min-h-[5.5rem] border-[--color-rule] p-1.5 sm:min-h-[7rem] ${
+                className={`group relative min-h-[5.5rem] border-rule p-1.5 sm:min-h-[7rem] ${
                   i % 7 !== 6 ? 'border-r' : ''
-                } ${i < 35 ? 'border-b' : ''} ${inMonth ? '' : 'bg-[--color-paper-sunk]/40'}`}
+                } ${i < 35 ? 'border-b' : ''} ${inMonth ? '' : 'bg-paper-sunk/40'}`}
               >
                 <div className="flex items-start justify-between">
                   <span
                     className={`grid size-6 place-items-center rounded-full text-xs ${
                       isToday
-                        ? 'bg-[--color-accent] font-semibold text-white'
+                        ? 'bg-accent font-semibold text-white'
                         : inMonth
-                          ? 'text-[--color-ink-muted]'
-                          : 'text-[--color-ink-faint]'
+                          ? 'text-ink-muted'
+                          : 'text-ink-faint'
                     }`}
                   >
                     {Number(day.slice(8))}
@@ -137,7 +137,7 @@ export function MonthCalendar({
                     type="button"
                     onClick={() => setOverlay({ kind: 'new', day })}
                     aria-label={`Add a post on ${day}`}
-                    className="rounded-md p-0.5 text-[--color-ink-faint] transition-opacity hover:bg-[--color-paper-sunk] hover:text-[--color-accent] focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+                    className="rounded-md p-0.5 text-ink-faint transition-opacity hover:bg-paper-sunk hover:text-accent focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
                   >
                     <PlusIcon className="size-4" />
                   </button>
@@ -149,7 +149,7 @@ export function MonthCalendar({
                       <button
                         type="button"
                         onClick={() => setOverlay({ kind: 'entry', id: entry.id })}
-                        className="flex w-full items-center gap-1 rounded-md bg-[--color-paper-sunk] px-1.5 py-1 text-left text-[11px] text-[--color-ink] hover:bg-[--color-accent-soft]"
+                        className="flex w-full items-center gap-1 rounded-md bg-paper-sunk px-1.5 py-1 text-left text-[11px] text-ink hover:bg-accent-soft"
                       >
                         <span
                           className={`size-1.5 shrink-0 rounded-full ${STATE_DOT[entry.state]}`}
@@ -217,7 +217,7 @@ function MonthButton({
       type="button"
       onClick={onClick}
       aria-label={label}
-      className="grid size-8 place-items-center rounded-lg border border-[--color-rule] text-sm text-[--color-ink-muted] hover:text-[--color-ink]"
+      className="grid size-8 place-items-center rounded-lg border border-rule text-sm text-ink-muted hover:text-ink"
     >
       {children}
     </button>
@@ -226,7 +226,7 @@ function MonthButton({
 
 function Legend() {
   return (
-    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-[--color-ink-faint]">
+    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-faint">
       {(Object.keys(STATE_LABELS) as Entry['state'][]).map((state) => (
         <span key={state} className="inline-flex items-center gap-1.5">
           <span className={`size-1.5 rounded-full ${STATE_DOT[state]}`} aria-hidden />
@@ -263,20 +263,18 @@ function Sheet({
         if (e.key === 'Escape') onClose();
       }}
     >
-      <div className="max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-[--color-card] shadow-[--shadow-lift] sm:rounded-2xl">
-        <header className="sticky top-0 flex items-start justify-between gap-4 border-b border-[--color-rule] bg-[--color-card] px-5 py-4">
+      <div className="max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-card shadow-lift sm:rounded-2xl">
+        <header className="sticky top-0 flex items-start justify-between gap-4 border-b border-rule bg-card px-5 py-4">
           <div className="min-w-0">
             <h3 className="truncate text-base font-semibold">{title}</h3>
-            {subtitle ? (
-              <p className="mt-0.5 text-xs text-[--color-ink-faint]">{subtitle}</p>
-            ) : null}
+            {subtitle ? <p className="mt-0.5 text-xs text-ink-faint">{subtitle}</p> : null}
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
             autoFocus
-            className="shrink-0 rounded-lg p-1 text-[--color-ink-faint] hover:text-[--color-ink]"
+            className="shrink-0 rounded-lg p-1 text-ink-faint hover:text-ink"
           >
             <CloseIcon className="size-5" />
           </button>
@@ -316,7 +314,7 @@ function EntryDetail({ entry, onChanged }: { entry: Entry; onChanged: () => void
 
   return (
     <>
-      <div className="divide-y divide-[--color-rule]">
+      <div className="divide-y divide-rule">
         <CopyField label="Hook" value={entry.hook} />
         <CopyField label="Caption" value={entry.caption} multiline />
         <CopyField
@@ -332,7 +330,7 @@ function EntryDetail({ entry, onChanged }: { entry: Entry; onChanged: () => void
             type="button"
             disabled={busy}
             onClick={() => void act({ action: 'publish' })}
-            className="rounded-full bg-[--color-accent] px-4 py-2 text-xs font-medium text-white disabled:opacity-50"
+            className="rounded-full bg-accent px-4 py-2 text-xs font-medium text-white disabled:opacity-50"
           >
             Mark posted
           </button>
@@ -341,7 +339,7 @@ function EntryDetail({ entry, onChanged }: { entry: Entry; onChanged: () => void
           type="button"
           disabled={busy}
           onClick={() => void remove()}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-[--color-rule] px-4 py-2 text-xs font-medium text-[--color-ink-muted] hover:text-[--color-negative] disabled:opacity-50"
+          className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-rule px-4 py-2 text-xs font-medium text-ink-muted hover:text-negative disabled:opacity-50"
         >
           <TrashIcon className="size-3.5" />
           Delete
@@ -395,13 +393,13 @@ function EntryForm({ day, onSaved }: { day: string; onSaved: () => void }) {
             type="time"
             name="timeOfDay"
             defaultValue="12:00"
-            className="w-full rounded-lg border border-[--color-rule] bg-[--color-paper] px-3 py-2 text-sm"
+            className="w-full rounded-lg border border-rule bg-paper px-3 py-2 text-sm"
           />
         </Field>
         <Field label="Format">
           <select
             name="format"
-            className="w-full rounded-lg border border-[--color-rule] bg-[--color-paper] px-3 py-2 text-sm"
+            className="w-full rounded-lg border border-rule bg-paper px-3 py-2 text-sm"
           >
             <option value="">—</option>
             <option value="carousel">Carousel</option>
@@ -415,42 +413,42 @@ function EntryForm({ day, onSaved }: { day: string; onSaved: () => void }) {
         <input
           name="title"
           autoComplete="off"
-          className="w-full rounded-lg border border-[--color-rule] bg-[--color-paper] px-3 py-2 text-sm"
+          className="w-full rounded-lg border border-rule bg-paper px-3 py-2 text-sm"
         />
       </Field>
       <Field label="Hook">
         <input
           name="hook"
           autoComplete="off"
-          className="w-full rounded-lg border border-[--color-rule] bg-[--color-paper] px-3 py-2 text-sm"
+          className="w-full rounded-lg border border-rule bg-paper px-3 py-2 text-sm"
         />
       </Field>
       <Field label="Caption">
         <textarea
           name="caption"
           rows={4}
-          className="w-full rounded-lg border border-[--color-rule] bg-[--color-paper] px-3 py-2 text-sm"
+          className="w-full rounded-lg border border-rule bg-paper px-3 py-2 text-sm"
         />
       </Field>
       <Field label="Hashtags">
         <input
           name="hashtags"
           placeholder="#kbeauty #skincare"
-          className="w-full rounded-lg border border-[--color-rule] bg-[--color-paper] px-3 py-2 text-sm"
+          className="w-full rounded-lg border border-rule bg-paper px-3 py-2 text-sm"
         />
       </Field>
       <Field label="Notes">
         <textarea
           name="notes"
           rows={2}
-          className="w-full rounded-lg border border-[--color-rule] bg-[--color-paper] px-3 py-2 text-sm"
+          className="w-full rounded-lg border border-rule bg-paper px-3 py-2 text-sm"
         />
       </Field>
 
       <button
         type="submit"
         disabled={saving}
-        className="w-full rounded-full bg-[--color-accent] px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+        className="w-full rounded-full bg-accent px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
       >
         {saving ? 'Saving…' : 'Save draft'}
       </button>
@@ -461,9 +459,7 @@ function EntryForm({ day, onSaved }: { day: string; onSaved: () => void }) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs uppercase tracking-wide text-[--color-ink-faint]">
-        {label}
-      </span>
+      <span className="mb-1 block text-xs uppercase tracking-wide text-ink-faint">{label}</span>
       {children}
     </label>
   );

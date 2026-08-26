@@ -45,11 +45,11 @@ export default async function CalendarPage() {
       <Header />
 
       {overdue.length > 0 ? (
-        <div className="rounded-xl border border-[--color-rule] bg-[--color-accent-soft] px-5 py-4">
+        <div className="rounded-xl border border-rule bg-accent-soft px-5 py-4">
           <p className="text-sm font-medium">
             {overdue.length} post{overdue.length === 1 ? '' : 's'} past their time
           </p>
-          <p className="mt-1 text-sm text-[--color-ink-muted]">
+          <p className="mt-1 text-sm text-ink-muted">
             {overdue
               .slice(0, 3)
               .map((e) => e.title || e.hook || formatRiyadh(e.scheduledFor))
@@ -71,7 +71,7 @@ function Header() {
   return (
     <header>
       <h1 className="text-2xl font-semibold tracking-tight">Calendar</h1>
-      <p className="mt-1 text-sm text-[--color-ink-muted]">
+      <p className="mt-1 text-sm text-ink-muted">
         What you plan to post, and when. Press the <span className="font-medium">+</span> on a day
         to add a draft to it.
       </p>

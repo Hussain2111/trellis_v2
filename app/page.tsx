@@ -4,7 +4,7 @@ import { followerChart, followsSummary, recentTotals } from '@/lib/dashboard/met
 import { accountOverview } from '@/lib/chat/queries';
 import { StickyNote } from '@/components/sticky-note';
 import { RefreshInsights } from '@/components/refresh-insights';
-import { EmptyState, Panel, PanelHeader, Stat } from '@/components/ui/primitives';
+import { EmptyState, Panel, PanelHeader, Stat, sampleNote } from '@/components/ui/primitives';
 import { formatRiyadhDate } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
@@ -60,7 +60,7 @@ export default async function DashboardPage() {
             {/* Fewer than six is the honest outcome, not a failure — so say so
                 rather than leaving a gap that reads as something missing. */}
             {cards.length < 4 ? (
-              <p className="mt-4 text-xs text-[--color-ink-faint]">
+              <p className="mt-4 text-xs text-ink-faint">
                 {cards.length} note{cards.length === 1 ? '' : 's'} this time. The rest weren&rsquo;t
                 supported by enough data to be worth showing.
               </p>
@@ -79,78 +79,73 @@ export default async function DashboardPage() {
       <section className="space-y-5">
         <h2 className="text-base font-semibold">Your account</h2>
 
+        {/* One panel, not three. The lower half had two headed panels, five
+            sample lines and two paragraphs of explanation around eight
+            numbers — more furniture than content, and the eye had nowhere to
+            land. The caveats still have to be said; they are said once. */}
         <Panel>
-          <PanelHeader
-            title="Followers"
-            aside={
-              followers.from && followers.to
-                ? `${followers.measured} of ${followers.total} days measured`
-                : undefined
-            }
-          />
-          <div className="grid divide-y divide-[--color-rule] sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-            <Stat label="Now" value={overview.followers ?? null} />
+          <div className="grid divide-y divide-rule sm:grid-cols-3 sm:divide-x sm:divide-y-0">
             <Stat
-              label="Change, 30 days"
-              value={followers.change === null ? null : formatChange(followers.change)}
-              unknownReason={
-                followers.measured < 2
-                  ? 'Needs two readings. One reading is not a change.'
-                  : undefined
+              label="Followers"
+              value={overview.followers ?? null}
+              note={
+                followers.change === null
+                  ? 'No change yet — that needs two readings'
+                  : `${formatChange(followers.change)} in 30 days`
               }
             />
             <Stat label="Following" value={overview.following ?? null} />
+            <Stat
+              label="Posts"
+              value={overview.coverage.posts}
+              note={
+                overview.coverage.oldestPost
+                  ? `back to ${formatRiyadhDate(new Date(overview.coverage.oldestPost))}`
+                  : undefined
+              }
+            />
           </div>
-          <p className="px-5 pb-4 text-xs text-[--color-ink-faint]">
-            Instagram serves about 30 days of follower history and no more. Days before that were
-            never available — the series grows forward from here.
-          </p>
         </Panel>
 
         <Panel>
-          <PanelHeader title="Last 30 days" />
-          <div className="grid divide-y divide-[--color-rule] sm:grid-cols-2 sm:divide-x lg:grid-cols-3">
+          <PanelHeader
+            title="Last 30 days"
+            aside={sampleNote(followers.measured, followers.total, 'day')}
+          />
+          <div className="grid divide-y divide-rule sm:grid-cols-2 sm:divide-x lg:grid-cols-3">
             {totals.map((metric) => (
               <Stat
                 key={metric.metric}
                 label={metric.label}
                 value={metric.total}
+                marked={metric.unstable && metric.measured > 0}
                 unknownReason={metric.measured === 0 ? 'Not collected for this period' : undefined}
-                sample={{ total: metric.days, measured: metric.measured }}
+                note={sampleNote(metric.measured, metric.days, 'day')}
               />
             ))}
           </div>
           {totals.some((m) => m.unstable && m.measured > 0) ? (
-            <p className="px-5 pb-4 text-xs text-[--color-ink-faint]">
-              Views, interactions and accounts-engaged were redefined by Instagram within the last
-              two years, so they are worth reading now but not worth comparing against older
-              periods.
+            <p className="border-t border-rule px-5 py-3 text-xs text-ink-faint">
+              <span className="text-accent">*</span> Instagram changed what these count within the
+              last two years. Worth reading now; not worth comparing against older periods.
             </p>
           ) : null}
         </Panel>
 
         {follows.measured > 0 && !follows.labelled ? (
-          <Panel>
-            <PanelHeader title="Follows and unfollows" aside="unlabelled" />
-            <div className="px-5 py-4 text-sm text-[--color-ink-muted]">
-              Instagram reports two figures here — {follows.follows} and {follows.unfollows} over 30
-              days — but labels them <span className="font-mono">FOLLOWER</span> and{' '}
-              <span className="font-mono">NON_FOLLOWER</span> rather than follows and unfollows.
-              Guessing which is which could show you a number that is exactly backwards, so they
-              stay unlabelled until a check against your actual follower count settles it.
-            </div>
-          </Panel>
+          <p className="text-xs text-ink-faint">
+            Instagram also reports {follows.follows} and {follows.unfollows} for follows and
+            unfollows over 30 days, but does not say which is which. They stay unlabelled until a
+            check against your actual follower count settles it.
+          </p>
         ) : null}
-      </section>
 
-      <p className="text-xs text-[--color-ink-faint]">
-        {overview.coverage.postsWithInsights} of {overview.coverage.posts} posts have performance
-        data
-        {overview.coverage.oldestPost
-          ? `, back to ${formatRiyadhDate(new Date(overview.coverage.oldestPost))}`
-          : ''}
-        .
-      </p>
+        <p className="text-xs text-ink-faint">
+          Follower history goes back about 30 days and no further — Instagram serves no more, so the
+          series grows forward from here. {overview.coverage.postsWithInsights} of{' '}
+          {overview.coverage.posts} posts have performance data.
+        </p>
+      </section>
     </main>
   );
 }
@@ -163,7 +158,7 @@ function Header({ handle }: { handle: string | null }) {
   return (
     <header>
       <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-      <p className="mt-1 text-sm text-[--color-ink-muted]">
+      <p className="mt-1 text-sm text-ink-muted">
         {handle ? `@${handle} — ` : ''}what your account is doing, and what you could do about it.
       </p>
     </header>

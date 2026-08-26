@@ -41,12 +41,12 @@ export function RefreshInsights() {
 
   return (
     <div className="flex items-center gap-3">
-      {note ? <span className="text-xs text-[--color-ink-faint]">{note}</span> : null}
+      {note ? <span className="text-xs text-ink-faint">{note}</span> : null}
       <button
         type="button"
         onClick={() => void refresh()}
         disabled={state === 'working'}
-        className="rounded-full border border-[--color-rule] px-3 py-1.5 text-xs font-medium text-[--color-ink-muted] transition-colors hover:bg-[--color-paper-sunk] disabled:opacity-50"
+        className="rounded-full border border-rule px-3 py-1.5 text-xs font-medium text-ink-muted transition-colors hover:bg-paper-sunk disabled:opacity-50"
       >
         {state === 'working' ? 'Thinking…' : 'Refresh'}
       </button>

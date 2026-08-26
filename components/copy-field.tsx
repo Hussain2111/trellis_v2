@@ -24,8 +24,8 @@ export function CopyField({
   if (!value) {
     return (
       <div className="py-2">
-        <div className="text-xs uppercase tracking-wide text-[--color-ink-faint]">{label}</div>
-        <div className="mt-1 text-sm text-[--color-ink-faint]">—</div>
+        <div className="text-xs uppercase tracking-wide text-ink-faint">{label}</div>
+        <div className="mt-1 text-sm text-ink-faint">—</div>
       </div>
     );
   }
@@ -43,18 +43,16 @@ export function CopyField({
   return (
     <div className="py-2">
       <div className="flex items-center justify-between gap-3">
-        <div className="text-xs uppercase tracking-wide text-[--color-ink-faint]">{label}</div>
+        <div className="text-xs uppercase tracking-wide text-ink-faint">{label}</div>
         <button
           type="button"
           onClick={() => void copy()}
-          className="rounded-full border border-[--color-rule] px-2.5 py-1 text-xs font-medium text-[--color-ink-muted] transition-colors hover:bg-[--color-paper-sunk]"
+          className="rounded-full border border-rule px-2.5 py-1 text-xs font-medium text-ink-muted transition-colors hover:bg-paper-sunk"
         >
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
-      <div
-        className={`mt-1 text-sm text-[--color-ink] ${multiline ? 'whitespace-pre-wrap' : 'truncate'}`}
-      >
+      <div className={`mt-1 text-sm text-ink ${multiline ? 'whitespace-pre-wrap' : 'truncate'}`}>
         {value}
       </div>
     </div>

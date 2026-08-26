@@ -34,7 +34,7 @@ function Pending() {
   return (
     <span
       aria-hidden
-      className="absolute right-1.5 top-1.5 size-1.5 animate-pulse rounded-full bg-[--color-accent]"
+      className="absolute right-1.5 top-1.5 size-1.5 animate-pulse rounded-full bg-accent"
     />
   );
 }
@@ -45,7 +45,7 @@ export function Nav() {
 
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-20 border-t border-[--color-rule] bg-[--color-card] sm:inset-y-0 sm:right-auto sm:w-16 sm:border-r sm:border-t-0"
+      className="fixed inset-x-0 bottom-0 z-20 border-t border-rule bg-card sm:inset-y-0 sm:right-auto sm:w-16 sm:border-r sm:border-t-0"
       aria-label="Main"
     >
       <Link
@@ -66,15 +66,13 @@ export function Nav() {
                 aria-current={active ? 'page' : undefined}
                 title={label}
                 className={`group relative flex flex-col items-center gap-1 px-2 py-3 text-[11px] font-medium transition-colors sm:size-11 sm:justify-center  sm:rounded-xl sm:p-0 ${
-                  active
-                    ? 'text-[--color-accent] sm:bg-[--color-accent-soft]'
-                    : 'text-[--color-ink-faint] hover:text-[--color-ink]'
+                  active ? 'text-accent sm:bg-accent-soft' : 'text-ink-faint hover:text-ink'
                 }`}
               >
                 <span className="relative">
                   <Icon />
                   {href === '/calendar' && overdue > 0 ? (
-                    <span className="absolute -right-2 -top-1.5 inline-flex min-w-[1.05rem] items-center justify-center rounded-full bg-[--color-accent] px-1 text-[10px] font-semibold text-white">
+                    <span className="absolute -right-2 -top-1.5 inline-flex min-w-[1.05rem] items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-white">
                       {overdue}
                     </span>
                   ) : null}
@@ -92,8 +90,8 @@ export function Nav() {
             title="Settings"
             className={`group relative flex flex-col items-center gap-1 px-2 py-3 text-[11px] font-medium transition-colors sm:size-11 sm:justify-center sm:rounded-xl sm:p-0 ${
               pathname === '/settings'
-                ? 'text-[--color-accent] sm:bg-[--color-accent-soft]'
-                : 'text-[--color-ink-faint] hover:text-[--color-ink]'
+                ? 'text-accent sm:bg-accent-soft'
+                : 'text-ink-faint hover:text-ink'
             }`}
           >
             <SettingsIcon />

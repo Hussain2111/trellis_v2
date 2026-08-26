@@ -71,7 +71,7 @@ export function StickyNote({
         background: TINTS[index % TINTS.length],
         rotate: ROTATIONS[index % ROTATIONS.length],
       }}
-      className="group relative flex min-h-[10rem] flex-col justify-between rounded-[--radius-note] p-5 shadow-[--shadow-note] transition-transform duration-150 hover:-translate-y-1 hover:shadow-[--shadow-lift]"
+      className="group relative flex min-h-[10rem] flex-col justify-between rounded-note p-5 shadow-note transition-transform duration-150 hover:-translate-y-1 hover:shadow-lift"
     >
       {/* The whole note is the target, but the post chips inside it are real
           links — so the note's own click surface sits underneath rather than
@@ -81,11 +81,11 @@ export function StickyNote({
         onClick={openInChat}
         disabled={busy}
         aria-label="Ask about this note"
-        className="absolute inset-0 z-0 rounded-[--radius-note]"
+        className="absolute inset-0 z-0 rounded-note"
       />
 
       <div className="pointer-events-none relative z-10">
-        <p className="text-[15px] leading-relaxed text-[--color-ink]">{body}</p>
+        <p className="text-[15px] leading-relaxed text-ink">{body}</p>
 
         {citedPosts.length > 0 ? (
           <div className="mt-4 flex flex-wrap gap-1.5">
@@ -96,7 +96,11 @@ export function StickyNote({
         ) : null}
       </div>
 
-      <span className="relative z-10 mt-4 text-xs text-[--color-ink-muted] opacity-0 transition-opacity group-hover:opacity-100">
+      {/* A hint, not a control — and `pointer-events-none` is what makes that
+          true. It used to sit over the note's own click surface and eat the
+          click, so the one part of the card that looked pressable was the one
+          part that did nothing. */}
+      <span className="pointer-events-none relative z-10 mt-4 text-xs text-ink-muted opacity-0 transition-opacity group-hover:opacity-100">
         {busy ? 'Opening…' : 'Ask about this →'}
       </span>
     </article>
@@ -111,9 +115,7 @@ function PostChip({ post }: { post: CitedPost }) {
   const label = describePost(post);
   if (!post.permalink) {
     return (
-      <span className="rounded-full bg-[--color-card]/60 px-2 py-1 text-[11px] text-[--color-ink-muted]">
-        {label}
-      </span>
+      <span className="rounded-full bg-card/60 px-2 py-1 text-[11px] text-ink-muted">{label}</span>
     );
   }
   return (
@@ -122,7 +124,7 @@ function PostChip({ post }: { post: CitedPost }) {
       target="_blank"
       rel="noreferrer noopener"
       onClick={(e) => e.stopPropagation()}
-      className="pointer-events-auto max-w-full truncate rounded-full bg-[--color-card]/70 px-2 py-1 text-[11px] text-[--color-ink-muted] transition-colors hover:bg-[--color-card] hover:text-[--color-ink]"
+      className="pointer-events-auto max-w-full truncate rounded-full bg-card/70 px-2 py-1 text-[11px] text-ink-muted transition-colors hover:bg-card hover:text-ink"
     >
       {label} ↗
     </a>

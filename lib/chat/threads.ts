@@ -4,9 +4,25 @@ import { accounts, chatMessages, chatThreads } from '../db/schema';
 import { renderChatSystem } from '../prompts/chat-system';
 import { accountOverview, insightCard } from './queries';
 
+/**
+ * The one account's id, remembered for the life of a warm function.
+ *
+ * Single account, no auth (decision 1) — so this row is written once by the
+ * bootstrap script and never changes. It was being looked up again on every
+ * page render and every API call, which is a whole round trip to Supabase in
+ * front of work that had not started yet.
+ *
+ * Only a HIT is cached. A miss means the account has not been created yet, and
+ * caching that would leave a warm function insisting the app is unconfigured
+ * long after it was configured.
+ */
+let cachedAccountId: number | null = null;
+
 export async function selfAccountId(): Promise<number | null> {
+  if (cachedAccountId !== null) return cachedAccountId;
   const [row] = await db().select({ id: accounts.id }).from(accounts).limit(1);
-  return row?.id ?? null;
+  cachedAccountId = row?.id ?? null;
+  return cachedAccountId;
 }
 
 export async function listThreads(accountId: number) {

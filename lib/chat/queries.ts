@@ -40,33 +40,37 @@ export interface Coverage {
 }
 
 export async function accountOverview(accountId: number) {
-  const [account] = await rows<{
-    handle: string;
-    followers_count: number | null;
-    follows_count: number | null;
-    last_synced_at: string | null;
-  }>(sql`
-    select handle, followers_count, follows_count, last_synced_at::text
-    from accounts where id = ${accountId}
-  `);
-
-  const [coverage] = await rows<Coverage>(sql`
+  // One round trip, not two. This is the most-called query in the app — every
+  // page, every chat turn — and it was paying for two trips to a database on
+  // the other side of the internet to fill one object.
+  const [row] = await rows<
+    Coverage & {
+      handle: string;
+      followers_count: number | null;
+      follows_count: number | null;
+      last_synced_at: string | null;
+    }
+  >(sql`
     select
-      (select count(*)::int from posts where account_id = ${accountId}) as posts,
+      a.handle, a.followers_count, a.follows_count, a.last_synced_at::text,
+      (select count(*)::int from posts where account_id = a.id) as posts,
       (select count(*)::int from post_insights i
          join posts p on p.id = i.post_id
-        where p.account_id = ${accountId} and i.checkpoint = 'latest' and i.reach is not null
+        where p.account_id = a.id and i.checkpoint = 'latest' and i.reach is not null
       ) as "postsWithInsights",
-      (select min(published_at)::date::text from posts where account_id = ${accountId}) as "oldestPost",
-      (select max(published_at)::date::text from posts where account_id = ${accountId}) as "newestPost",
-      (select count(*)::int from account_daily where account_id = ${accountId}) as "accountDays",
-      (select count(follower_count)::int from account_daily where account_id = ${accountId}) as "followerDays"
+      (select min(published_at)::date::text from posts where account_id = a.id) as "oldestPost",
+      (select max(published_at)::date::text from posts where account_id = a.id) as "newestPost",
+      (select count(*)::int from account_daily where account_id = a.id) as "accountDays",
+      (select count(follower_count)::int from account_daily where account_id = a.id) as "followerDays"
+    from accounts a
+    where a.id = ${accountId}
   `);
 
-  // Guaranteed present rather than possibly-undefined: the aggregate always
-  // returns exactly one row, and making every caller defend against a shape
-  // that cannot occur just moves noise downstream.
-  const safeCoverage: Coverage = coverage ?? {
+  const account = row;
+
+  // Guaranteed present rather than possibly-undefined: making every caller
+  // defend against a shape that cannot occur just moves noise downstream.
+  const safeCoverage: Coverage = row ?? {
     posts: 0,
     postsWithInsights: 0,
     oldestPost: null,
