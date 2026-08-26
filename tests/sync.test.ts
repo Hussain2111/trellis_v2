@@ -7,6 +7,7 @@ import { RunBudget } from '../lib/sync/budget';
 import { checkpointsDue, missingCheckpointReason, tooNewFor } from '../lib/sync/checkpoints';
 import { backfillPostInsights } from '../lib/sync/insights';
 import { syncMedia } from '../lib/sync/media';
+import { syncAccountDaily } from '../lib/sync/account';
 import { __setEnvForTests } from '../lib/env';
 
 __setEnvForTests({ IG_ACCESS_TOKEN: 'test-token' });
@@ -203,6 +204,69 @@ describe('backfill', () => {
     __setGraphFetchForTests(async () => reply({ data: [] }));
     await backfillPostInsights(accountId, new RunBudget());
     const second = await backfillPostInsights(accountId, new RunBudget());
+    expect(second.stats.skipped).toBe('already completed');
+  });
+});
+
+describe('account_daily resumption', () => {
+  it('converges when Meta has no data, instead of asking forever', async () => {
+    // THE REGRESSION. The first version skipped a metric only when a number was
+    // already stored, so any day Meta has nothing for was re-requested on every
+    // tick — 360 requests against a 120-request budget, never finishing. It ran
+    // for 32 minutes in production before anyone noticed.
+    //
+    // "Fetched" and "has a value" are different facts. A null answer is a
+    // COMPLETED fetch.
+    __setGraphFetchForTests(
+      async (input) =>
+        String(input).includes('metric_type=total_value')
+          ? reply({ data: [{ total_value: {} }] }) // accepted, no value
+          : reply({ data: [{ values: [] }] }), // no series either
+    );
+
+    let ticks = 0;
+    let done = false;
+    while (!done && ticks < 30) {
+      ticks += 1;
+      const result = await syncAccountDaily(accountId, 'IG1', new RunBudget({ maxRequests: 40 }), {
+        backfill: true,
+        now: new Date('2026-08-26T12:00:00Z'),
+      });
+      done = result.done;
+    }
+
+    expect(done).toBe(true);
+    expect(ticks).toBeLessThan(30);
+  });
+
+  it('records a reason when a metric returns nothing, so it is never re-asked', async () => {
+    __setGraphFetchForTests(async () => reply({ data: [{ total_value: {} }] }));
+    await syncAccountDaily(accountId, 'IG1', new RunBudget(), {
+      backfill: false,
+      now: new Date('2026-08-26T12:00:00Z'),
+    });
+
+    const rows = await db()
+      .select()
+      .from(accountDaily)
+      .where(eq(accountDaily.accountId, accountId));
+    const row = rows[0];
+    expect(row?.views).toBeNull();
+    // Attempted, and Meta had nothing. Distinct from never having asked.
+    expect(row?.unavailable?.views).toBe('declined_by_meta');
+  });
+
+  it('runs the historical pass once', async () => {
+    __setGraphFetchForTests(async () => reply({ data: [{ values: [] }] }));
+    // It takes several ticks — 90 days of four metrics each against a bounded
+    // budget is the point of the design, not an accident.
+    let done = false;
+    for (let i = 0; i < 30 && !done; i += 1) {
+      done = (await syncAccountDaily(accountId, 'IG1', new RunBudget(), { backfill: true })).done;
+    }
+    expect(done).toBe(true);
+
+    const second = await syncAccountDaily(accountId, 'IG1', new RunBudget(), { backfill: true });
     expect(second.stats.skipped).toBe('already completed');
   });
 });

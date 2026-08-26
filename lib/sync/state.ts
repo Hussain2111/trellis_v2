@@ -2,7 +2,8 @@ import { and, desc, eq } from 'drizzle-orm';
 import { db } from '../db/client';
 import { syncRuns } from '../db/schema';
 
-export type SyncKind = 'account' | 'media' | 'post_insights' | 'comments' | 'backfill';
+export type SyncKind =
+  'account' | 'account_backfill' | 'media' | 'post_insights' | 'comments' | 'backfill';
 
 export interface SyncState {
   runId: number;

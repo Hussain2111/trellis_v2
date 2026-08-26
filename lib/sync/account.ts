@@ -8,7 +8,7 @@ import { riyadhDayKey } from '../time';
 import type { RunBudget } from './budget';
 import { BACKFILL_EXPENSIVE_DAYS, BACKFILL_MAX_WINDOWS } from './config';
 import type { UnitResult } from './media';
-import { beginRun, finishRun } from './state';
+import { beginRun, finishRun, hasCompleted, saveCursor } from './state';
 
 /** Merge one metric into a day's row without disturbing the others. */
 async function upsertDay(
@@ -22,7 +22,12 @@ async function upsertDay(
     .values({ accountId, day, ...patch, unavailable: unavailable ?? null })
     .onConflictDoUpdate({
       target: [accountDaily.accountId, accountDaily.day],
-      set: { ...patch, ...(unavailable ? { unavailable } : {}) },
+      // Only touch `unavailable` when there is something to say. Writing an
+      // empty map would erase reasons another metric just recorded.
+      set: {
+        ...patch,
+        ...(unavailable && Object.keys(unavailable).length > 0 ? { unavailable } : {}),
+      },
     });
 }
 
@@ -69,6 +74,14 @@ export async function syncAccountProfile(
  * History is walked by paging BACKWARDS in 30-day windows. Meta caps a
  * since/until range at 30 days per request; that is not a horizon, and `reach`
  * returns data at least 365 days back when asked this way.
+ *
+ * RESUMPTION IS BY ATTEMPT, NOT BY VALUE. The first version skipped a metric
+ * only when a number was already stored, which meant any day Meta has no data
+ * for was re-requested on every tick — 360 requests against a 120-request
+ * budget, never converging. "Fetched" and "has a value" are different facts,
+ * and conflating them is the same blank-versus-unknown error this project
+ * exists to avoid, wearing different clothes. A null result is a COMPLETED
+ * fetch: it is recorded with a reason and never asked again.
  */
 export async function syncAccountDaily(
   accountId: number,
@@ -76,56 +89,75 @@ export async function syncAccountDaily(
   budget: RunBudget,
   options: { backfill?: boolean; now?: Date } = {},
 ): Promise<UnitResult> {
-  const state = await beginRun(accountId, 'account');
+  const backfill = options.backfill ?? false;
+  const kind = backfill ? 'account_backfill' : 'account';
+
+  // The historical pass runs once. The daily pass runs every day.
+  if (backfill && (await hasCompleted(accountId, kind))) {
+    return { done: true, cursor: null, stats: { skipped: 'already completed' } };
+  }
+
+  const state = await beginRun(accountId, kind);
   const now = options.now ?? new Date();
-  const windows = options.backfill ? BACKFILL_MAX_WINDOWS : 1;
+  const totalWindows = backfill ? BACKFILL_MAX_WINDOWS : 1;
+  const totalDays = backfill ? BACKFILL_EXPENSIVE_DAYS : 1;
+
+  // Cursor carries the phase and index, so a tick that runs out of budget
+  // resumes mid-walk rather than restarting it.
+  const resumed = parseCursor(state.cursor);
   let daysWritten = 0;
   let windowsWalked = 0;
 
   try {
-    for (const window of backwardWindows(now, windows)) {
-      if (!budget.canSpend() || budget.throttleImminent()) {
-        return {
-          done: false,
-          cursor: null,
-          stats: { daysWritten, windowsWalked, ...budget.stats },
-        };
-      }
-
-      let sawAnything = false;
-
-      for (const metric of SERIES_METRICS) {
-        if (!budget.canSpend()) break;
-        try {
-          const { points, usage } = await fetchAccountSeries(igUserId, metric, window);
-          budget.spend(usage);
-          for (const point of points) {
-            await upsertDay(accountId, point.day, { [toColumn(metric)]: point.value });
-            daysWritten += 1;
-            sawAnything = true;
-          }
-        } catch {
-          // A metric that stops returning is how the real horizon announces
-          // itself. Not an error — a boundary.
-          budget.spend();
+    if (resumed.phase === 'windows') {
+      for (let index = resumed.index; index < totalWindows; index += 1) {
+        if (!budget.canSpend() || budget.throttleImminent()) {
+          await saveCursor(state.runId, `w:${index}`);
+          return {
+            done: false,
+            cursor: `w:${index}`,
+            stats: { daysWritten, windowsWalked, ...budget.stats },
+          };
         }
+
+        const window = windowAt(now, index);
+        let sawAnything = false;
+
+        for (const metric of SERIES_METRICS) {
+          if (!budget.canSpend()) break;
+          try {
+            const { points, usage } = await fetchAccountSeries(igUserId, metric, window);
+            budget.spend(usage);
+            for (const point of points) {
+              await upsertDay(accountId, point.day, { [toColumn(metric)]: point.value });
+              daysWritten += 1;
+              sawAnything = true;
+            }
+          } catch {
+            // A metric that stops returning is how the real horizon announces
+            // itself. A boundary, not an error.
+            budget.spend();
+          }
+        }
+
+        windowsWalked += 1;
+        await saveCursor(state.runId, `w:${index + 1}`);
+
+        // Nothing from either stable metric: we have walked past the end of
+        // available history. Stop rather than spending the rest of the budget
+        // on windows Meta will not serve.
+        if (!sawAnything) break;
       }
-
-      windowsWalked += 1;
-
-      // Nothing came back for this window from either stable metric: we have
-      // walked past the end of available history. Stop rather than burning the
-      // remaining budget on windows Meta will not serve.
-      if (!sawAnything) break;
+      await saveCursor(state.runId, 'd:1');
     }
 
-    // The expensive four, recent days only, one request per day.
-    const expensiveDays = options.backfill ? BACKFILL_EXPENSIVE_DAYS : 1;
-    for (let i = 1; i <= expensiveDays; i += 1) {
+    const firstDay = resumed.phase === 'days' ? resumed.index : 1;
+    for (let i = firstDay; i <= totalDays; i += 1) {
       if (!budget.canSpend() || budget.throttleImminent()) {
+        await saveCursor(state.runId, `d:${i}`);
         return {
           done: false,
-          cursor: null,
+          cursor: `d:${i}`,
           stats: { daysWritten, windowsWalked, ...budget.stats },
         };
       }
@@ -134,28 +166,43 @@ export async function syncAccountDaily(
       const window = { since: dayStart, until: dayStart + 86_400 };
       const day = riyadhDayKey(new Date(dayStart * 1000));
 
-      // Metric-level resumability: skip a metric already stored for this day,
-      // so raising BACKFILL_EXPENSIVE_DAYS later fills only the gap.
       const [existing] = await db()
         .select()
         .from(accountDaily)
         .where(sql`${accountDaily.accountId} = ${accountId} and ${accountDaily.day} = ${day}`)
         .limit(1);
 
+      // Accumulated across the metric loop, because `unavailable` is a single
+      // jsonb column and the upsert REPLACES it. Reading `existing` once before
+      // the loop and spreading it each time meant every metric overwrote the
+      // previous one's reason, leaving only the last. Caught by a test that
+      // asked for the first metric's reason by name.
+      const reasons: UnavailableMap = { ...(existing?.unavailable ?? {}) };
+
       for (const metric of TOTAL_VALUE_METRICS) {
         const column = toColumn(metric);
-        if (existing && existing[column as keyof typeof existing] != null) continue;
+        // Skip on ATTEMPTED, not on has-a-value. A stored reason means this was
+        // already asked and Meta had nothing — asking again would loop forever.
+        if (existing && wasAttempted(existing, column)) continue;
         if (!budget.canSpend()) break;
+
         try {
           const { value, usage } = await fetchAccountTotal(igUserId, metric, window);
           budget.spend(usage);
-          await upsertDay(accountId, day, { [column]: value });
+          if (value === null) {
+            reasons[column] = 'declined_by_meta';
+            await upsertDay(accountId, day, {}, reasons);
+          } else {
+            await upsertDay(accountId, day, { [column]: value }, reasons);
+          }
         } catch {
           budget.spend();
-          await upsertDay(accountId, day, {}, { [column]: 'declined_by_meta' });
+          reasons[column] = 'declined_by_meta';
+          await upsertDay(accountId, day, {}, reasons);
         }
       }
       daysWritten += 1;
+      await saveCursor(state.runId, `d:${i + 1}`);
     }
 
     const stats = { daysWritten, windowsWalked, ...budget.stats };
@@ -171,6 +218,29 @@ export async function syncAccountDaily(
     );
     throw error;
   }
+}
+
+function windowAt(from: Date, index: number): { since: number; until: number } {
+  const windows = [...backwardWindows(from, index + 1)];
+  return windows[index]!;
+}
+
+function parseCursor(cursor: string | null): { phase: 'windows' | 'days'; index: number } {
+  if (!cursor) return { phase: 'windows', index: 0 };
+  const [phase, raw] = cursor.split(':');
+  const index = Number(raw);
+  if (phase === 'd' && Number.isFinite(index)) return { phase: 'days', index };
+  if (phase === 'w' && Number.isFinite(index)) return { phase: 'windows', index };
+  return { phase: 'windows', index: 0 };
+}
+
+/** Has this metric already been asked for on this day, whatever the answer was? */
+function wasAttempted(
+  row: { unavailable: UnavailableMap | null } & Record<string, unknown>,
+  column: string,
+): boolean {
+  if (row[column] != null) return true;
+  return Boolean(row.unavailable?.[column]);
 }
 
 function toColumn(metric: string): string {

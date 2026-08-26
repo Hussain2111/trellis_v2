@@ -57,7 +57,12 @@ export async function runSyncTick(
   const checkpoints = await syncDueCheckpoints(account.id, budget);
   if (!checkpoints.done) return { done: false, stage: 'checkpoints', stats: checkpoints.stats };
 
-  const daily = await syncAccountDaily(account.id, igUserId, budget, { backfill: true });
+  // The one-time historical pass, guarded like the post backfill.
+  const history = await syncAccountDaily(account.id, igUserId, budget, { backfill: true });
+  if (!history.done) return { done: false, stage: 'account_daily', stats: history.stats };
+
+  // And yesterday, every day.
+  const daily = await syncAccountDaily(account.id, igUserId, budget, { backfill: false });
   if (!daily.done) return { done: false, stage: 'account_daily', stats: daily.stats };
 
   return { done: true, stage: 'account_daily', stats: { ...daily.stats, media: media.stats } };
