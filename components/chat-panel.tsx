@@ -16,7 +16,15 @@ interface Message {
  * So the wait is honest: tool activity is visible, then the answer arrives
  * whole.
  */
-export function ChatPanel({ threadId, initial }: { threadId: number; initial: Message[] }) {
+export function ChatPanel({
+  threadId,
+  initial,
+  sourceCardId,
+}: {
+  threadId: number;
+  initial: Message[];
+  sourceCardId?: number | null;
+}) {
   const [messages, setMessages] = useState<Message[]>(initial);
   const [input, setInput] = useState('');
   const [pending, setPending] = useState(false);
@@ -40,7 +48,13 @@ export function ChatPanel({ threadId, initial }: { threadId: number; initial: Me
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ threadId, message: text }),
+        // The card reference travels with the first message only. The chat
+        // fetches its evidence itself rather than being handed it.
+        body: JSON.stringify({
+          threadId,
+          message: text,
+          sourceCardId: messages.length === 0 ? (sourceCardId ?? undefined) : undefined,
+        }),
       });
       const body = await res.json();
 
@@ -66,8 +80,9 @@ export function ChatPanel({ threadId, initial }: { threadId: number; initial: Me
           <div className="rounded-xl border border-[--color-rule] bg-[--color-card] px-5 py-8 text-center">
             <p className="text-sm font-medium text-[--color-ink-muted]">Ask about your account</p>
             <p className="mx-auto mt-2 max-w-md text-sm text-[--color-ink-faint]">
-              Every number comes from your own data or it doesn&rsquo;t get said. Try{' '}
-              <em>which of my carousels beat my reel median on saves?</em>
+              {sourceCardId
+                ? 'Ask about the note you just opened — it will look up what that note was based on.'
+                : 'Every number comes from your own data or it doesn’t get said.'}
             </p>
           </div>
         ) : null}

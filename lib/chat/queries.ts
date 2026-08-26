@@ -339,3 +339,41 @@ export async function recentPosts(accountId: number, limit = 10, format?: string
   `);
   return { posts, count: posts.length };
 }
+
+/**
+ * One insight card, re-resolved.
+ *
+ * This is the chat/dashboard contract. Clicking a note passes a REFERENCE, and
+ * the chat fetches the card through here so its figures arrive as a tool result
+ * — which is what the validator checks the answer against. Had the evidence
+ * been pasted into the prompt instead, it would count as unbacked and the chat
+ * would strip the card's own numbers when repeating them.
+ */
+export async function insightCard(accountId: number, cardId: number) {
+  const [card] = await rows<{
+    id: number;
+    body: string;
+    payload: unknown;
+    cited_post_ids: number[] | null;
+    generated_at: string;
+  }>(sql`
+    select id, body, payload, cited_post_ids, generated_at::text
+    from insight_cards
+    where id = ${cardId} and account_id = ${accountId}
+  `);
+
+  if (!card) return { found: false as const, cardId };
+
+  const age = Math.floor((Date.now() - new Date(card.generated_at).getTime()) / 86_400_000);
+
+  return {
+    found: true as const,
+    body: card.body,
+    evidence: card.payload,
+    citedPostIds: card.cited_post_ids ?? [],
+    generatedAt: card.generated_at.slice(0, 10),
+    // Cards are generated on a schedule, so one may be days old. Saying so is
+    // the difference between quoting it and asserting it as current.
+    freshness: age === 0 ? 'generated today' : `generated ${age} day${age === 1 ? '' : 's'} ago`,
+  };
+}

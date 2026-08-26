@@ -5,6 +5,7 @@ import {
   followerSeries,
   formatBreakdown,
   postPerformance,
+  insightCard,
   postsRanked,
   recentPosts,
   trailingMedian,
@@ -90,6 +91,13 @@ export function chatTools(accountId: number) {
         'One post in detail, including which timed readings exist. A post published before measurement began has no 24h/48h/7d reading — that is "never measured", which is NOT zero and NOT the same as a post being too new. Never imply a post has a curve when hasCurve is false.',
       inputSchema: z.object({ postId: z.number().int() }),
       execute: async ({ postId }) => envelope(await postPerformance(accountId, postId)),
+    }),
+
+    getInsightCard: tool({
+      description:
+        'The evidence behind a note from the dashboard. Call this when the conversation started from one — it returns what the note was computed from, and how old it is. Say when it was generated rather than implying it is current.',
+      inputSchema: z.object({ cardId: z.number().int() }),
+      execute: async ({ cardId }) => envelope(await insightCard(accountId, cardId)),
     }),
 
     getRecentPosts: tool({

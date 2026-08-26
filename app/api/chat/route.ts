@@ -17,7 +17,12 @@ import { stripUnbackedSentences } from '@/lib/validate/numbers';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const bodySchema = z.object({ threadId: z.number().int(), message: z.string().min(1).max(4000) });
+const bodySchema = z.object({
+  threadId: z.number().int(),
+  message: z.string().min(1).max(4000),
+  /** Set when the thread was opened from a dashboard note. */
+  sourceCardId: z.number().int().optional(),
+});
 
 const CAPS = { dailyCalls: 200, reservedForCards: 40 };
 
@@ -32,7 +37,7 @@ const CAPS = { dailyCalls: 200, reservedForCards: 40 };
 export async function POST(request: Request): Promise<Response> {
   const parsed = bodySchema.safeParse(await request.json());
   if (!parsed.success) return Response.json({ error: 'bad request' }, { status: 400 });
-  const { threadId, message } = parsed.data;
+  const { threadId, message, sourceCardId } = parsed.data;
 
   const accountId = await selfAccountId();
   if (!accountId) {
@@ -67,7 +72,11 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const result = await generateText({
       model: model.model,
-      system: await buildSystemPrompt(accountId),
+      system:
+        (await buildSystemPrompt(accountId)) +
+        (sourceCardId
+          ? `\n\nThis conversation began from dashboard note ${sourceCardId}. Call getInsightCard with cardId ${sourceCardId} first, and say when it was generated rather than implying it is current.`
+          : ''),
       messages: history.map((m) => ({
         role: m.role as 'user' | 'assistant',
         content: m.content,
