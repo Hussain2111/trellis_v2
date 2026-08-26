@@ -19,7 +19,8 @@
     "probe:graph": "tsx scripts/probe/graph.ts",
     "probe:lookback": "tsx scripts/probe/insights-lookback.ts",
     "probe:account-insights": "tsx scripts/probe/account-insights.ts",
-    "setup:account": "tsx scripts/bootstrap-account.ts"
+    "setup:account": "tsx scripts/bootstrap-account.ts",
+    "status": "tsx scripts/status.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.50",

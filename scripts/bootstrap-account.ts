@@ -5,6 +5,7 @@ import { accounts } from '../lib/db/schema';
 import { env } from '../lib/env';
 import { graphGet } from '../lib/graph/client';
 import { riyadhDayKey } from '../lib/time';
+import { explainError, schemaHint } from './explain-error';
 
 /**
  * One-time setup: create the account row the sync works against.
@@ -97,35 +98,13 @@ async function main(): Promise<void> {
   console.log('\nNext: run the Sync workflow (GitHub → Actions → Sync → Run workflow).');
 }
 
-/**
- * Drizzle wraps a query failure in its own error and puts Postgres's actual
- * complaint — the part that says WHICH column is missing — on `cause`. Printing
- * only the top-level message shows the SQL and hides the reason, which is how a
- * one-line fix looks like a mystery.
- */
-function explain(error: unknown): string {
-  const parts: string[] = [];
-  let current: unknown = error;
-  for (let depth = 0; current instanceof Error && depth < 5; depth += 1) {
-    parts.push(current.message);
-    current = (current as { cause?: unknown }).cause;
-  }
-  return parts.join('\n  ↳ ');
-}
-
 try {
   await main();
 } catch (error) {
-  console.error(`\nFailed: ${explain(error)}`);
-
-  // The overwhelmingly likely cause on a first run, and the one the raw error
-  // describes least helpfully.
-  if (/column .* does not exist|relation .* does not exist/i.test(explain(error))) {
-    console.error(
-      '\n  That looks like the database is behind the schema this code expects.' +
-        '\n  Run `npm run db:migrate` against it, then try again.',
-    );
-  }
+  const detail = explainError(error);
+  console.error(`\nFailed: ${detail}`);
+  const hint = schemaHint(detail);
+  if (hint) console.error(`\n  ${hint}`);
   process.exitCode = 1;
 } finally {
   await closeDb();

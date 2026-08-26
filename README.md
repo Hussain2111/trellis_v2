@@ -100,6 +100,16 @@ labelled at all.
 
 Then, on GitHub: **Actions → Sync → Run workflow**.
 
+Afterwards, to see what actually landed:
+
+```bash
+npm run status
+```
+
+Read-only. It reports counts, date ranges, per-metric coverage, and **the reason
+behind every gap** — because "0 rows" and "we never asked" and "Meta had
+nothing" are three different situations and only one of them is a problem.
+
 It calls `/api/sync` repeatedly until the response says `"done":true`. Each
 call does a bounded amount of work and returns; the runner calls it back. Expect
 several iterations — the one-time backfill walks 243 posts and is deliberately
