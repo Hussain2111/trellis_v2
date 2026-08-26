@@ -1,0 +1,138 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+
+interface Message {
+  role: 'user' | 'assistant';
+  content: string;
+  dropped?: number;
+}
+
+/**
+ * No streaming, by design.
+ *
+ * The answer is validated before it is rendered, because a figure the database
+ * cannot back is dropped rather than caveated — and you cannot un-send a token.
+ * So the wait is honest: tool activity is visible, then the answer arrives
+ * whole.
+ */
+export function ChatPanel({ threadId, initial }: { threadId: number; initial: Message[] }) {
+  const [messages, setMessages] = useState<Message[]>(initial);
+  const [input, setInput] = useState('');
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const endRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, pending]);
+
+  async function send() {
+    const text = input.trim();
+    if (!text || pending) return;
+
+    setInput('');
+    setError(null);
+    setMessages((m) => [...m, { role: 'user', content: text }]);
+    setPending(true);
+
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ threadId, message: text }),
+      });
+      const body = await res.json();
+
+      if (!res.ok) {
+        setError(body.message ?? 'Something went wrong.');
+        return;
+      }
+      setMessages((m) => [
+        ...m,
+        { role: 'assistant', content: body.answer, dropped: body.dropped },
+      ]);
+    } catch {
+      setError('Could not reach the server.');
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div className="flex min-h-[60vh] flex-col">
+      <div className="flex-1 space-y-4">
+        {messages.length === 0 ? (
+          <div className="rounded-xl border border-[--color-rule] bg-[--color-card] px-5 py-8 text-center">
+            <p className="text-sm font-medium text-[--color-ink-muted]">Ask about your account</p>
+            <p className="mx-auto mt-2 max-w-md text-sm text-[--color-ink-faint]">
+              Every number comes from your own data or it doesn&rsquo;t get said. Try{' '}
+              <em>which of my carousels beat my reel median on saves?</em>
+            </p>
+          </div>
+        ) : null}
+
+        {messages.map((message, i) => (
+          <div
+            key={i}
+            className={message.role === 'user' ? 'flex justify-end' : 'flex justify-start'}
+          >
+            <div
+              className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                message.role === 'user'
+                  ? 'bg-[--color-accent-soft] text-[--color-ink]'
+                  : 'border border-[--color-rule] bg-[--color-card]'
+              }`}
+            >
+              <p className="whitespace-pre-wrap">{message.content}</p>
+              {message.dropped ? (
+                <p className="mt-2 border-t border-[--color-rule] pt-2 text-xs text-[--color-ink-faint]">
+                  {message.dropped} statement{message.dropped === 1 ? '' : 's'} removed — the
+                  figures weren&rsquo;t in the data.
+                </p>
+              ) : null}
+            </div>
+          </div>
+        ))}
+
+        {pending ? (
+          <div className="flex justify-start">
+            <div className="rounded-2xl border border-[--color-rule] bg-[--color-card] px-4 py-3 text-sm text-[--color-ink-faint]">
+              Checking your data…
+            </div>
+          </div>
+        ) : null}
+
+        {error ? (
+          <div className="rounded-xl border border-[--color-rule] bg-[--color-card] px-4 py-3 text-sm text-[--color-negative]">
+            {error}
+          </div>
+        ) : null}
+
+        <div ref={endRef} />
+      </div>
+
+      <form
+        className="sticky bottom-20 mt-6 flex gap-2 sm:bottom-0"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void send();
+        }}
+      >
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="Ask about your posts…"
+          className="flex-1 rounded-full border border-[--color-rule] bg-[--color-card] px-5 py-3 text-sm outline-none focus:border-[--color-accent]"
+        />
+        <button
+          type="submit"
+          disabled={pending || input.trim().length === 0}
+          className="rounded-full bg-[--color-accent] px-5 py-3 text-sm font-medium text-white disabled:opacity-40"
+        >
+          Ask
+        </button>
+      </form>
+    </div>
+  );
+}
