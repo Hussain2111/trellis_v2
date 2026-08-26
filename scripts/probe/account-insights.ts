@@ -153,13 +153,37 @@ function pastWindow(startDaysAgo: number, endDaysAgo: number): Record<string, st
   };
 }
 
+/** The only error that a `metric_type=total_value` retry can possibly fix. */
+function wantsTotalValue(detail: string): boolean {
+  return detail.includes('metric_type=total_value');
+}
+
+/**
+ * Try plain, and retry with `metric_type=total_value` ONLY when Meta said that
+ * is the problem.
+ *
+ * The previous version retried on any error and returned only the retry's
+ * message, so a request that failed for one reason reported a different one —
+ * `follower_count` rejects `total_value`, so every past-window failure came
+ * back as an incompatibility from a retry that should never have been made,
+ * hiding the real cause.
+ *
+ * That is the same defect as the one fixed in `probeRange` a commit earlier,
+ * written again one function over. Catching a class of bug once evidently does
+ * not inoculate against reintroducing it, so this one reports BOTH errors when
+ * a retry happens and also fails.
+ */
 async function askEither(
   metric: string,
   window: Record<string, string>,
 ): Promise<Outcome & { usage: Record<string, string> }> {
   const plain = await ask(metric, window);
   if (plain.shape !== 'error') return plain;
-  return ask(metric, { metric_type: 'total_value', ...window });
+  if (!wantsTotalValue(plain.detail)) return plain;
+
+  const retried = await ask(metric, { metric_type: 'total_value', ...window });
+  if (retried.shape !== 'error') return retried;
+  return { ...retried, detail: `plain: ${plain.detail} | total_value: ${retried.detail}` };
 }
 
 /**
@@ -224,6 +248,51 @@ async function probeRange(): Promise<void> {
       '  is a per-request range cap. The backfill then pages backwards in 30-day\n' +
       '  windows until the values stop, and THAT point is the real horizon.',
   );
+}
+
+/**
+ * Is daily `reach` additive?
+ *
+ * Reach counts UNIQUE accounts, so an account reached on Monday and Wednesday
+ * is one reach for the week and two in a sum of days. If the sum exceeds the
+ * window total, summing daily reach into a period figure produces a
+ * confidently wrong number — the exact failure this product is organised
+ * against — and the window total must be requested instead.
+ */
+async function probeReachAdditivity(): Promise<void> {
+  console.log('\n  (c) IS DAILY REACH ADDITIVE?\n');
+
+  const total = await ask('reach', { metric_type: 'total_value', ...windowParams(30) });
+  const res = await call(`${IG_USER_ID}/insights`, {
+    metric: 'reach',
+    period: 'day',
+    ...windowParams(30),
+  });
+  const values = (res.body as { data?: InsightRow[] })?.data?.[0]?.values ?? [];
+
+  if (total.shape !== 'total' || values.length === 0) {
+    console.log(`    could not compare: total=${total.shape}, ${values.length} daily values`);
+    return;
+  }
+
+  const summed = values.reduce((acc, v) => acc + (Number(v.value) || 0), 0);
+  const windowTotal = Number(/single total: (-?\d+)/.exec(total.detail)?.[1] ?? NaN);
+
+  console.log(`    sum of ${values.length} daily values : ${summed}`);
+  console.log(`    30-day window total          : ${windowTotal}`);
+
+  if (!Number.isFinite(windowTotal)) {
+    console.log('    could not parse the window total.');
+  } else if (summed > windowTotal) {
+    console.log(
+      `\n    NOT ADDITIVE — the sum is ${(summed / windowTotal).toFixed(2)}× the window total,\n` +
+        `    because reach counts unique accounts and the same account reached on two\n` +
+        `    days is counted twice. NEVER sum daily reach into a period figure —\n` +
+        `    request the window total instead.`,
+    );
+  } else {
+    console.log('\n    Sum does not exceed the window total. Additive, or close enough to be.');
+  }
 }
 
 /**
@@ -378,8 +447,9 @@ async function verifyMapping(follower: number, nonFollower: number, days: number
     );
   } else {
     console.log(
-      `\n  (Running-total reading skipped: the series starts and ends at 0, so it\n` +
-        `   is not a running total. Testing it anyway would only add noise.)`,
+      `\n  (Running-total reading skipped: the series reads ${numeric[0]} → ${numeric[numeric.length - 1]}\n` +
+        `   against an account of several thousand followers, so it is not a running\n` +
+        `   total. Testing it anyway would only add noise.)`,
     );
   }
 

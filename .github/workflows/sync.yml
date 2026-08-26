@@ -1,0 +1,62 @@
+name: Sync
+
+# The thing that advances the work.
+#
+# Nothing advances a job by itself on a serverless host, and a Vercel function
+# has a wall-clock ceiling, so /api/sync does a bounded amount and returns
+# {done:false}. This runner calls it back until it reports done. Spreading a
+# long operation across several invocations is correct behaviour, not a
+# failure — and the answer to "what is advancing the queue" is this runner,
+# never a browser tab.
+#
+# Needs: repository VARIABLE APP_URL (the STABLE production domain) and
+# repository SECRET CRON_SECRET, byte-identical to the Vercel variable.
+
+on:
+  schedule:
+    - cron: '0 23 * * *' # 02:00 Riyadh, after the day's posts have settled
+  workflow_dispatch:
+    inputs:
+      max_iterations:
+        description: Safety cap on the loop
+        default: '40'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Call until done
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          MAX_ITERATIONS: ${{ github.event.inputs.max_iterations || '40' }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "APP_URL variable or CRON_SECRET secret is not set."
+            exit 1
+          fi
+
+          for i in $(seq 1 "$MAX_ITERATIONS"); do
+            code=$(curl -s -o /tmp/body -w '%{http_code}' -X POST "$APP_URL/api/sync" \
+              -H "Authorization: Bearer $CRON_SECRET")
+            echo "--- iteration $i (HTTP $code)"
+            cat /tmp/body; echo
+
+            if [ "$code" != "200" ]; then
+              echo "Sync returned HTTP $code — stopping."
+              exit 1
+            fi
+
+            if grep -q '"done":true' /tmp/body; then
+              echo "Sync reported done after $i iteration(s)."
+              exit 0
+            fi
+
+            # Unhurried on purpose. There is no reason to rush, and this is
+            # exactly where a rate limit would bite.
+            sleep 5
+          done
+
+          echo "Hit the iteration cap without finishing. Not a failure — the next"
+          echo "scheduled run resumes from the stored cursor."
