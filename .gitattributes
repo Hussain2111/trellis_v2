@@ -1,0 +1,11 @@
+# Normalise line endings to LF in the working tree on every platform.
+#
+# Without this, git checks out CRLF on Windows and every single file fails
+# `prettier --check`, which made `npm run verify` unusable there — 70 files
+# reported as misformatted when nothing was wrong with any of them.
+* text=auto eol=lf
+
+# Binary-ish things git should not touch.
+*.png binary
+*.jpg binary
+*.ico binary

@@ -10,3 +10,6 @@ probe-*.json
 *-probe.json
 backup-*.sql
 backup-*.sql.gz
+
+# Test-only database. Never point this at Supabase.
+.env.test.local

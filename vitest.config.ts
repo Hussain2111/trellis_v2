@@ -16,7 +16,10 @@ export default defineConfig({
      * dotenv does not override variables already set, so CI keeps the
      * DATABASE_URL it exports and only local runs read the file.
      */
-    setupFiles: ['dotenv/config'],
+    // Order matters: dotenv first so DATABASE_URL is populated, then the
+    // guard, which refuses to let a truncating test suite touch a non-local
+    // database.
+    setupFiles: ['dotenv/config', './tests/guard.setup.ts'],
     /**
      * Several test files share one real database — there is no per-file
      * sandbox — so parallel files let one file's cleanup race another's

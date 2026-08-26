@@ -65,6 +65,24 @@ tests but not typecheck — once put a type error into a production deploy that
 had passed local checks. There is no longer a way to run "most of" the checks
 by accident.
 
+> **`npm test` needs a LOCAL Postgres, and refuses anything else.** The database
+> tests begin with `truncate ... cascade`, and vitest loads `.env` — which on a
+> machine that also operates this app points at production Supabase. A guard in
+> `tests/guard.setup.ts` stops the suite with an explanation rather than
+> destroying every synced post and every day of follower history that Meta will
+> not serve twice.
+>
+> Point it somewhere disposable in `.env.test.local` (git-ignored, vitest loads
+> it):
+>
+> ```
+> DATABASE_URL=postgres://postgres:postgres@localhost:5432/trellis_test
+> ```
+>
+> With no local Postgres, skip the tests and let CI run them — CI has its own
+> throwaway database. `npm run typecheck && npm run lint && npm run build` covers
+> everything else.
+
 The dev server process is `next-server`, not `next start` — `pkill -f "next
 start"` does nothing and you will spend a round testing stale code. Use
 `fuser -k 3000/tcp`.
