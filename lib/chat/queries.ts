@@ -1,5 +1,7 @@
-import { sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '../db/client';
+import { posts } from '../db/schema';
+import { riyadhDayKey } from '../time';
 
 /**
  * Every statistic the chat can state, computed here in SQL.
@@ -348,21 +350,40 @@ export async function recentPosts(accountId: number, limit = 10, format?: string
  * and there is no way for them to work out which post it refers to. What they
  * know a post by is when it went up and what it was about.
  */
-export async function postsByIds(accountId: number, ids: number[]) {
+export interface NamedPost {
+  id: number;
+  permalink: string | null;
+  published: string | null;
+  format: string;
+  caption: string | null;
+}
+
+export async function postsByIds(accountId: number, ids: number[]): Promise<NamedPost[]> {
   if (ids.length === 0) return [];
-  return rows<{
-    id: number;
-    permalink: string | null;
-    published: string | null;
-    format: string;
-    caption: string | null;
-  }>(sql`
-    select id, permalink, published_at::date::text as published,
-           media_type as format, left(caption, 120) as caption
-    from posts
-    where account_id = ${accountId} and id = any(${ids})
-    order by published_at desc nulls last
-  `);
+
+  // The query builder rather than a raw template, because `id = any($1)` with a
+  // JS array does not survive the trip: drizzle flattens the array into
+  // separate parameters and the driver is handed a number where it expects an
+  // array. `inArray` builds the list properly.
+  const found = await db()
+    .select({
+      id: posts.id,
+      permalink: posts.permalink,
+      publishedAt: posts.publishedAt,
+      mediaType: posts.mediaType,
+      caption: posts.caption,
+    })
+    .from(posts)
+    .where(and(eq(posts.accountId, accountId), inArray(posts.id, ids)))
+    .orderBy(desc(posts.publishedAt));
+
+  return found.map((post) => ({
+    id: post.id,
+    permalink: post.permalink,
+    published: post.publishedAt ? riyadhDayKey(post.publishedAt) : null,
+    format: post.mediaType,
+    caption: post.caption?.slice(0, 120) ?? null,
+  }));
 }
 
 /**
@@ -375,6 +396,11 @@ export async function postsByIds(accountId: number, ids: number[]) {
  * would strip the card's own numbers when repeating them.
  */
 export async function insightCard(accountId: number, cardId: number) {
+  // `generated_at` is on the BATCH, not the card — a card has no timestamp of
+  // its own. Selecting it from `insight_cards` threw on every call, which meant
+  // the entire card-to-chat contract had never once worked: clicking a note
+  // reached a tool that could only error. Nothing caught it because nothing
+  // tested it, so there is a test beside this now.
   const [card] = await rows<{
     id: number;
     body: string;
@@ -382,9 +408,10 @@ export async function insightCard(accountId: number, cardId: number) {
     cited_post_ids: number[] | null;
     generated_at: string;
   }>(sql`
-    select id, body, payload, cited_post_ids, generated_at::text
-    from insight_cards
-    where id = ${cardId} and account_id = ${accountId}
+    select c.id, c.body, c.payload, c.cited_post_ids, b.generated_at::text
+    from insight_cards c
+    join insight_batches b on b.id = c.batch_id
+    where c.id = ${cardId} and c.account_id = ${accountId}
   `);
 
   if (!card) return { found: false as const, cardId };

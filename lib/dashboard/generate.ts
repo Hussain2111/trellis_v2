@@ -6,7 +6,7 @@ import { insightBatches, insightCards } from '../db/schema';
 import { resolveModel } from '../model/provider';
 import { validateClaims } from '../validate/numbers';
 import { buildCardPayload } from './payload';
-import { postsByIds } from '../chat/queries';
+import { postsByIds, type NamedPost } from '../chat/queries';
 
 /**
  * SQL computes → the model interprets → code validates → the result is cached.
@@ -184,7 +184,7 @@ export async function latestCards(accountId: number) {
       ...card,
       citedPosts: (card.citedPostIds ?? [])
         .map((id) => byId.get(id))
-        .filter((post): post is (typeof posts)[number] => post !== undefined),
+        .filter((post): post is NamedPost => post !== undefined),
     })),
   };
 }

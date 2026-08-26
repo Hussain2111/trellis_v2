@@ -1,17 +1,27 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { closeDb, db } from '../lib/db/client';
-import { accountDaily, accounts, postInsights, posts } from '../lib/db/schema';
+import {
+  accountDaily,
+  accounts,
+  insightBatches,
+  insightCards,
+  postInsights,
+  posts,
+} from '../lib/db/schema';
 import { stripUnbackedSentences } from '../lib/validate/numbers';
 import { chatTools } from '../lib/chat/tools';
 import {
   accountOverview,
   followerSeries,
   formatBreakdown,
+  insightCard,
   postPerformance,
+  postsByIds,
   postsRanked,
   trailingMedian,
 } from '../lib/chat/queries';
+import { createThreadFromCard, threadMessages } from '../lib/chat/threads';
 
 let accountId: number;
 
@@ -208,5 +218,105 @@ describe('the guarantee, against real tool output', () => {
       evidence,
     );
     expect(dropped).toHaveLength(1);
+  });
+});
+
+/**
+ * The seam between the dashboard and the chat, which had never once worked.
+ *
+ * `getInsightCard` selected `generated_at` from `insight_cards` — a column that
+ * lives on `insight_batches`. Every call threw, so clicking a note reached a
+ * tool that could only error. The build was green, the types were fine, and
+ * nothing here exercised it. It surfaced from opening the page.
+ */
+describe('the card to chat contract', () => {
+  async function seedCard() {
+    const [post] = await db().select().from(posts).limit(1);
+    const [batch] = await db()
+      .insert(insightBatches)
+      .values({ accountId, status: 'ok', cardsRequested: 1, cardsKept: 1 })
+      .returning();
+    const [card] = await db()
+      .insert(insightCards)
+      .values({
+        accountId,
+        batchId: batch!.id,
+        body: 'Your carousels reach fewer people than your reels.',
+        payload: { medianReach: 700 },
+        citedPostIds: [post!.id],
+        rank: 0,
+      })
+      .returning();
+    return { card: card!, post: post! };
+  }
+
+  it('resolves a card, with the batch it was generated in', async () => {
+    const { card } = await seedCard();
+    const resolved = await insightCard(accountId, card.id);
+
+    expect(resolved.found).toBe(true);
+    if (!resolved.found) return;
+    expect(resolved.body).toBe('Your carousels reach fewer people than your reels.');
+    expect(resolved.evidence).toEqual({ medianReach: 700 });
+    expect(resolved.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(resolved.freshness).toBe('generated today');
+  });
+
+  it('answers found:false rather than throwing for a card that is not there', async () => {
+    expect((await insightCard(accountId, 9999)).found).toBe(false);
+  });
+
+  it('will not resolve another account’s card', async () => {
+    const { card } = await seedCard();
+    const [other] = await db()
+      .insert(accounts)
+      .values({ igUserId: 'IG2', handle: 'someone-else' })
+      .returning();
+    expect((await insightCard(other!.id, card.id)).found).toBe(false);
+  });
+
+  it('opens a thread with the note already in it, as the assistant', async () => {
+    const { card } = await seedCard();
+    const thread = await createThreadFromCard(accountId, card.id);
+    const history = await threadMessages(thread.id);
+
+    expect(thread.sourceCardId).toBe(card.id);
+    expect(history).toHaveLength(1);
+    expect(history[0]?.role).toBe('assistant');
+    expect(history[0]?.content).toContain('Your carousels reach fewer people');
+    // The evidence does NOT cross over — only the note's own validated text.
+    expect(history[0]?.content).not.toContain('medianReach');
+  });
+});
+
+describe('naming a post the way its author knows it', () => {
+  it('returns date, format and caption for the ids a note cites', async () => {
+    const all = await db().select().from(posts).limit(2);
+    const named = await postsByIds(
+      accountId,
+      all.map((p) => p.id),
+    );
+
+    expect(named).toHaveLength(2);
+    expect(named[0]?.published).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(named[0]?.format).toBeTruthy();
+  });
+
+  it('returns nothing for an empty list rather than every post', async () => {
+    expect(await postsByIds(accountId, [])).toEqual([]);
+  });
+
+  it('will not return another account’s posts', async () => {
+    const all = await db().select().from(posts).limit(2);
+    const [other] = await db()
+      .insert(accounts)
+      .values({ igUserId: 'IG3', handle: 'someone-else' })
+      .returning();
+    expect(
+      await postsByIds(
+        other!.id,
+        all.map((p) => p.id),
+      ),
+    ).toEqual([]);
   });
 });
