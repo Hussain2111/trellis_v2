@@ -17,10 +17,13 @@ Cloud-hosted on **Vercel** and **Supabase**, at $0/month.
 
 ## Where this is
 
-**Stage 1 — the walking skeleton.** Deployed-shaped but not yet deployed: the
-app builds, migrations run through a script, the keepalive writes, cron auth
-holds, and `/settings` reports the resolved environment. No account data is
-synced and none of the three surfaces is built.
+**Deployed, with the data layer built.** The app is live on Vercel against a
+real Supabase project, the scheduler runs from GitHub Actions against the
+production domain, the schema is applied, and the Graph client and sync layer
+are written and tested.
+
+**Not yet built: the three surfaces.** Chat, the dashboard's insight cards, and
+the calendar are all still empty states.
 
 The full plan is in [`docs/plan.md`](docs/plan.md) — foundation, three surface
 lifecycles, a staged roadmap, and an open-questions register. The written record
@@ -60,6 +63,21 @@ npm run typecheck && npm run lint && npm test && npm run build
 The dev server process is `next-server`, not `next start` — `pkill -f "next
 start"` does nothing and you will spend a round testing stale code. Use
 `fuser -k 3000/tcp`.
+
+## What the probes established
+
+The Graph API's real behaviour is in [`docs/graph-api.md`](docs/graph-api.md),
+written from probe output rather than documentation. The three findings that
+shape everything else:
+
+- **Insights have no lookback boundary** — 242 of 243 posts return data, the
+  oldest 1,907 days old. The chat has five years of history on day one.
+- **But Meta serves cumulative totals and no curve.** A curve exists only where
+  it was sampled at the time, so `t24`/`t48`/`t7d` can never exist for a post
+  published before this app did. Those carry `never_sampled`, which is a
+  different claim from zero, from "too new", and from Meta declining.
+- **30 days is a per-request range cap, not a horizon.** History is walked by
+  paging backwards in 30-day windows.
 
 ## Scheduling
 

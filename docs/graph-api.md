@@ -102,26 +102,55 @@ chart is therefore populated on day one rather than blank for a month.
 schema: `accounts.followers_count` is the current value, `account_daily`'s
 series is `follower_count`.
 
-### `[PENDING]` — shape, and how far back
+### Shape and cost `[VERIFIED-LIVE]`
 
-`npm run probe:account-insights` answers both. Record the results here.
+| Metric               | `metric_type=total_value` | Shape        | Requests for N days |
+| -------------------- | ------------------------- | ------------ | ------------------- |
+| `reach`              | optional                  | **series**   | 1 per 30-day window |
+| `follower_count`     | **REJECTED**              | **series**   | 1 per 30-day window |
+| `views`              | **required**              | window total | N — one per day     |
+| `profile_views`      | **required**              | window total | N                   |
+| `accounts_engaged`   | **required**              | window total | N                   |
+| `total_interactions` | **required**              | window total | N                   |
 
-| Metric               | Series or window total? | One-day window usable? | Largest window returning |
-| -------------------- | ----------------------- | ---------------------- | ------------------------ |
-| `reach`              | series (30d confirmed)  | _pending_              | _pending_                |
-| `views`              | _pending_               | _pending_              | _pending_                |
-| `profile_views`      | _pending_               | _pending_              | _pending_                |
-| `accounts_engaged`   | _pending_               | _pending_              | _pending_                |
-| `total_interactions` | _pending_               | _pending_              | _pending_                |
-| `follower_count`     | series (30d confirmed)  | _pending_              | _pending_                |
+Every metric yields a usable value from a one-day window, so `account_daily`
+holds all six keyed by day. But the cost is not uniform and neither is the
+parameter — `follower_count` errors:
 
-**Why the shape decides a table.** `metric_type=total_value` typically returns
-one aggregate for the requested window, not a per-day series. If those four
-metrics only support that, there is no daily series for them, and per-day values
-mean **one request per day** — 30 for a month, 365 for a year. Affordable at the
-measured headroom, but a different operation from the single windowed call
-`reach` supports. The one-day-window column is the decisive one: it says whether
-a per-day backfill is possible at all.
+```
+(#100) The following metric (follower_count) is incompatible with the metric type (total_value)
+```
+
+Applying `total_value` uniformly therefore breaks four metrics or one,
+depending which way you guess. It is a per-metric lookup, not a flag.
+
+### 30 days is a per-request CAP, not a horizon `[VERIFIED-LIVE]`
+
+```
+(#100) There cannot be more than 30 days (2592000 s) between since and until.
+```
+
+A window placed **entirely in the past** returns data: `reach` served a 29-day
+series for **365 → 336 days ago**. So history is walked by **paging backwards
+in 30-day windows** until values stop, and that stopping point is the real
+horizon.
+
+Every window that ends at `now` is useless for answering this — a range cap and
+a history boundary produce identical output — which is how an earlier probe run
+reached the wrong conclusion.
+
+**`follower_count`'s own depth is still unknown.** A probe fallback retried
+with `total_value` on _any_ error and returned the retry's message, so every
+past-window attempt reported the incompatibility above instead of whatever the
+plain request actually said. Fixed; needs one more run.
+
+### `reach` is not additive
+
+It counts **unique accounts**, so an account reached on Monday and Wednesday is
+one reach for the window and two in a sum of days. **Never sum daily reach into
+a period figure** — request the window total instead. Summing is a live route to
+a confidently wrong number on a page whose whole claim is that it does not
+produce those.
 
 ## `follows_and_unfollows`
 
