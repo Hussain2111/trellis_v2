@@ -201,8 +201,25 @@ export const accountDaily = pgTable(
      * opinion about which day 22:00 UTC belongs to.
      */
     day: text('day').notNull(),
-    /** The historical series. NOT `accounts.followers_count`, which is current. */
+    /**
+     * Meta's `follower_count` metric. NOT `accounts.followers_count`.
+     *
+     * What it counts is still unsettled (Q2a): the evidence fits GROSS NEW
+     * FOLLOWS PER DAY rather than a running total — it read 0 at both ends of a
+     * window on an account holding ~4,872 followers, and its 30-day sum matched
+     * Meta's FOLLOWER dimension exactly, twice. So it must not be subtracted
+     * end-to-end as though it were a total.
+     */
     followerCount: integer('follower_count'),
+    /**
+     * The profile's own follower total, snapshotted on the day it was read.
+     *
+     * This is the column a net change can honestly be computed from, because it
+     * IS a running total by construction. Meta serves no history for it, so it
+     * only grows forward from the first sync that wrote one — which is exactly
+     * why it has to start being written rather than derived later.
+     */
+    followersTotal: integer('followers_total'),
     reach: integer('reach'),
     views: integer('views'),
     profileViews: integer('profile_views'),

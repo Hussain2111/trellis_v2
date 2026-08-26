@@ -10,11 +10,36 @@ import { BACKFILL_EXPENSIVE_DAYS, BACKFILL_MAX_WINDOWS } from './config';
 import type { UnitResult } from './media';
 import { beginRun, finishRun, hasCompleted, saveCursor } from './state';
 
+/**
+ * The columns a day's row can carry, by their schema property names.
+ *
+ * Typed rather than `Record<string, number | null>`, because the loose version
+ * accepted a key that is not a column: a patch written `{ followers_total: n }`
+ * type-checked, contributed nothing to the insert, and produced an UPDATE with
+ * an empty SET clause — a syntax error from postgres at runtime, on a path the
+ * build had signed off. The column name and the property name differ for
+ * exactly the columns where this is easy to get wrong.
+ */
+type DailyPatch = Partial<
+  Pick<
+    typeof accountDaily.$inferInsert,
+    | 'followerCount'
+    | 'followersTotal'
+    | 'reach'
+    | 'views'
+    | 'profileViews'
+    | 'accountsEngaged'
+    | 'totalInteractions'
+    | 'follows'
+    | 'unfollows'
+  >
+>;
+
 /** Merge one metric into a day's row without disturbing the others. */
 async function upsertDay(
   accountId: number,
   day: string,
-  patch: Record<string, number | null>,
+  patch: DailyPatch,
   unavailable?: UnavailableMap,
 ): Promise<void> {
   await db()
@@ -60,6 +85,19 @@ export async function syncAccountProfile(
       updatedAt: new Date(),
     })
     .where(eq(accounts.id, accountId));
+
+  // Snapshot the profile's follower total against today.
+  //
+  // Meta serves no history for this field and only ~30 days for its
+  // `follower_count` metric, which is not a running total anyway. A real net
+  // change — the number that answers "did I lose followers this week" — can
+  // only ever come from readings this app took itself. So it starts taking
+  // them. Nothing is backfilled; the series grows forward from the first sync.
+  if (body.followers_count != null) {
+    await upsertDay(accountId, riyadhDayKey(new Date()), {
+      followersTotal: body.followers_count,
+    });
+  }
 }
 
 /**
@@ -243,6 +281,24 @@ function wasAttempted(
   return Boolean(row.unavailable?.[column]);
 }
 
-function toColumn(metric: string): string {
-  return metric.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+/**
+ * Meta's metric name to this schema's property name.
+ *
+ * A lookup rather than a snake-to-camel regex. The regex was right for every
+ * metric it was given, but it returned `string`, which is what let a
+ * non-existent column through the type checker one function above.
+ */
+const METRIC_COLUMN = {
+  follower_count: 'followerCount',
+  reach: 'reach',
+  views: 'views',
+  profile_views: 'profileViews',
+  accounts_engaged: 'accountsEngaged',
+  total_interactions: 'totalInteractions',
+} as const satisfies Record<string, keyof DailyPatch>;
+
+function toColumn(metric: string): keyof DailyPatch {
+  const column = (METRIC_COLUMN as Record<string, keyof DailyPatch>)[metric];
+  if (!column) throw new Error(`no column for account metric: ${metric}`);
+  return column;
 }

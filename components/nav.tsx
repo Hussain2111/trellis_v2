@@ -48,13 +48,10 @@ export function Nav() {
       className="fixed inset-x-0 bottom-0 z-20 border-t border-rule bg-card sm:inset-y-0 sm:right-auto sm:w-16 sm:border-r sm:border-t-0"
       aria-label="Main"
     >
-      <Link
-        href="/"
-        className="hidden size-16 place-items-center text-lg font-semibold tracking-tight sm:grid"
-        aria-label="Trellis home"
-      >
-        T
-      </Link>
+      {/* No wordmark linking home. The dashboard icon already goes there, and
+          two controls doing one job is one control too many in a rail this
+          narrow. */}
+      <div className="hidden h-6 sm:block" />
 
       <ul className="flex sm:flex-col sm:items-center sm:gap-1">
         {ITEMS.map(({ href, label, Icon }) => {

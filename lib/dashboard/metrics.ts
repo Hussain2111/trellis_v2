@@ -15,17 +15,37 @@ async function rows<T>(query: ReturnType<typeof sql>): Promise<T[]> {
 
 export interface DayPoint {
   day: string;
-  followers: number | null;
+  /** The profile's own follower total on that day — a running total, and ours. */
+  followersTotal: number | null;
+  /** Meta's daily metric. See the warning below before doing arithmetic on it. */
+  followerMetric: number | null;
   reach: number | null;
-  missingFollowers: string | null;
 }
 
+/**
+ * Followers over time, and the one figure here that has to be got right.
+ *
+ * A net change was being computed as `last − first` of Meta's `follower_count`
+ * metric. That is only meaningful if the metric is a running total, and this
+ * project's own probes say it is not: it read 0 at both ends of a window on an
+ * account holding ~4,872 followers, and its 30-day sum matched Meta's FOLLOWER
+ * dimension exactly on two separate runs — the signature of gross new follows
+ * per day. Subtracting one day's arrivals from another day's arrivals and
+ * printing it under "Change, 30 days" is a confidently wrong number on a page
+ * whose whole claim is that it does not produce those.
+ *
+ * The change now comes from `followers_total`, which is the profile's own
+ * follower count snapshotted by the sync. It is a running total by
+ * construction. It has no history before the first sync that wrote one, and
+ * until there are two readings there is no change to state — which is a blank
+ * with a reason, not a zero.
+ */
 export async function followerChart(accountId: number, days = 30) {
   const points = await rows<DayPoint>(sql`
     select day,
-           follower_count as followers,
-           reach,
-           (unavailable ->> 'follower_count') as "missingFollowers"
+           followers_total as "followersTotal",
+           follower_count as "followerMetric",
+           reach
     from account_daily
     where account_id = ${accountId}
     order by day desc
@@ -33,7 +53,7 @@ export async function followerChart(accountId: number, days = 30) {
   `);
   points.reverse();
 
-  const measured = points.filter((p) => p.followers != null);
+  const measured = points.filter((p) => p.followersTotal != null);
   const first = measured[0];
   const last = measured[measured.length - 1];
 
@@ -41,13 +61,17 @@ export async function followerChart(accountId: number, days = 30) {
     points,
     measured: measured.length,
     total: points.length,
-    // Only a real change if there are two real readings. One reading gives no
-    // change at all — and rendering that as 0 would say "you held steady",
-    // which is a different and false claim.
     change:
-      measured.length >= 2 && first?.followers != null && last?.followers != null
-        ? last.followers - first.followers
+      measured.length >= 2 && first?.followersTotal != null && last?.followersTotal != null
+        ? last.followersTotal - first.followersTotal
         : null,
+    // Why there is no change to show, in the reader's terms rather than ours.
+    changeUnavailable:
+      measured.length === 0
+        ? 'Nothing recorded yet — this starts from your next sync'
+        : measured.length === 1
+          ? 'One reading so far. A change needs two'
+          : undefined,
     from: first?.day ?? null,
     to: last?.day ?? null,
   };

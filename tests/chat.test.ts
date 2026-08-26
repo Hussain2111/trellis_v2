@@ -22,6 +22,7 @@ import {
   trailingMedian,
 } from '../lib/chat/queries';
 import { createThreadFromCard, threadMessages } from '../lib/chat/threads';
+import { followerChart } from '../lib/dashboard/metrics';
 
 let accountId: number;
 
@@ -153,17 +154,58 @@ describe('follower series', () => {
     await db()
       .insert(accountDaily)
       .values([
-        { accountId, day: '2026-08-24', followerCount: 4870 },
+        { accountId, day: '2026-08-24', followerCount: 3, followersTotal: 4870 },
         { accountId, day: '2026-08-25', unavailable: { follower_count: 'declined_by_meta' } },
-        { accountId, day: '2026-08-26', followerCount: 4876 },
+        { accountId, day: '2026-08-26', followerCount: 5, followersTotal: 4876 },
       ]);
 
     const series = await followerSeries(accountId, 10);
     expect(series.days).toBe(3);
     expect(series.measured).toBe(2);
     const gap = series.points.find((p) => p.day === '2026-08-25');
-    expect(gap?.value).toBeNull();
+    expect(gap?.total).toBeNull();
+    expect(gap?.arrivals).toBeNull();
     expect(gap?.missing).toBe('declined_by_meta');
+  });
+
+  /**
+   * The wrong number this replaced.
+   *
+   * A 30-day change was `last − first` of Meta's `follower_count`, which is only
+   * meaningful for a running total. The probes say it is not one: it read 0 at
+   * both ends on an account holding ~4,872 followers, and its 30-day sum matched
+   * Meta's FOLLOWER dimension exactly, twice. Here that subtraction would give
+   * 5 − 3 = 2 and print "+2 followers" — plausible, and made up.
+   */
+  it('computes change from the follower total, not from Meta’s daily metric', async () => {
+    await db()
+      .insert(accountDaily)
+      .values([
+        { accountId, day: '2026-08-24', followerCount: 3, followersTotal: 4870 },
+        { accountId, day: '2026-08-26', followerCount: 5, followersTotal: 4861 },
+      ]);
+
+    const chart = await followerChart(accountId, 30);
+    expect(chart.change).toBe(-9);
+    expect(chart.changeUnavailable).toBeUndefined();
+  });
+
+  it('states no change at all until it has two readings of its own', async () => {
+    await db()
+      .insert(accountDaily)
+      .values([{ accountId, day: '2026-08-24', followerCount: 3 }]);
+
+    const nothing = await followerChart(accountId, 30);
+    expect(nothing.change).toBeNull();
+    expect(nothing.changeUnavailable).toMatch(/Nothing recorded yet/);
+
+    await db()
+      .insert(accountDaily)
+      .values([{ accountId, day: '2026-08-25', followersTotal: 4870 }]);
+
+    const one = await followerChart(accountId, 30);
+    expect(one.change).toBeNull();
+    expect(one.changeUnavailable).toMatch(/needs two/);
   });
 });
 

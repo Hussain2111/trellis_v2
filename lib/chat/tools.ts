@@ -95,7 +95,7 @@ export function chatTools(accountId: number) {
 
     getInsightCard: tool({
       description:
-        'The evidence behind a note from the dashboard. Call this when the conversation started from one — it returns what the note was computed from, and how old it is. Say when it was generated rather than implying it is current.',
+        'The evidence behind a note from the dashboard. Call this when the conversation started from one — it returns what the note was computed from, and how old it is. Do not announce that you called it. Give its age only if you restate one of its figures, and only so the reader knows it is not live.',
       inputSchema: z.object({ cardId: z.number().int() }),
       execute: async ({ cardId }) => envelope(await insightCard(accountId, cardId)),
     }),

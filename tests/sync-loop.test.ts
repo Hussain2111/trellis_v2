@@ -133,6 +133,25 @@ describe('the sync loop, driven as the runner drives it', () => {
     ).toBe(TOTAL_POSTS);
   });
 
+  /**
+   * The only source of a real net follower change.
+   *
+   * Meta serves no history for the profile's follower total, and its
+   * `follower_count` metric is not a running total — the probes read 0 at both
+   * ends of a window on an account holding ~4,872 followers. So the series has
+   * to be recorded by this app, one reading per sync, or it does not exist.
+   */
+  it('snapshots the profile follower total against today', async () => {
+    __setGraphFetchForTests(fakeGraph());
+    await driveToCompletion(25);
+
+    const [row] = (await db().execute(
+      sql`select followers_total from account_daily where followers_total is not null`,
+    )) as unknown as { followers_total: number }[];
+
+    expect(row?.followers_total).toBe(4876);
+  });
+
   it('finishes even when Meta has no account data at all', async () => {
     // The exact production failure: a metric with no value was re-requested on
     // every tick, so the loop could never converge.

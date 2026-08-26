@@ -15,6 +15,13 @@
       "when": 1787663531455,
       "tag": "0001_panoramic_mantis",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787774087185,
+      "tag": "0002_puzzling_thena",
+      "breakpoints": true
     }
   ]
 }

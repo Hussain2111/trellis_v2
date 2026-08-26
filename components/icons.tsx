@@ -53,11 +53,18 @@ export function CalendarIcon(props: IconProps) {
   );
 }
 
+/**
+ * A cog, not a sun.
+ *
+ * The first version was a circle with eight radial spokes, which is the
+ * standard way to draw a sun and was read as one. A gear reads as a gear
+ * because of the teeth — blocks around the rim, not lines radiating off it.
+ */
 export function SettingsIcon(props: IconProps) {
   return (
     <Svg {...props}>
-      <circle cx="12" cy="12" r="3" />
-      <path d="M12 2.5v2.2M12 19.3v2.2M21.5 12h-2.2M4.7 12H2.5M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6M18.7 18.7l-1.6-1.6M6.9 6.9 5.3 5.3" />
+      <circle cx="12" cy="12" r="3.2" />
+      <path d="M19.1 14.4a1.6 1.6 0 0 0 .32 1.76l.06.06a1.9 1.9 0 1 1-2.7 2.7l-.05-.06a1.6 1.6 0 0 0-1.77-.32 1.6 1.6 0 0 0-.96 1.46v.16a1.9 1.9 0 1 1-3.8 0v-.08a1.6 1.6 0 0 0-1.04-1.46 1.6 1.6 0 0 0-1.76.32l-.06.06a1.9 1.9 0 1 1-2.7-2.7l.06-.06a1.6 1.6 0 0 0 .32-1.76 1.6 1.6 0 0 0-1.46-.96H3.3a1.9 1.9 0 1 1 0-3.8h.08a1.6 1.6 0 0 0 1.46-1.05 1.6 1.6 0 0 0-.32-1.76l-.06-.05a1.9 1.9 0 1 1 2.7-2.7l.05.06a1.6 1.6 0 0 0 1.77.32h.07a1.6 1.6 0 0 0 .96-1.46V3.3a1.9 1.9 0 1 1 3.8 0v.08a1.6 1.6 0 0 0 .97 1.46 1.6 1.6 0 0 0 1.76-.32l.05-.06a1.9 1.9 0 1 1 2.7 2.7l-.06.05a1.6 1.6 0 0 0-.32 1.77v.07a1.6 1.6 0 0 0 1.46.96h.16a1.9 1.9 0 1 1 0 3.8h-.08a1.6 1.6 0 0 0-1.46.97Z" />
     </Svg>
   );
 }

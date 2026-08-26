@@ -1,0 +1,1 @@
+ALTER TABLE "account_daily" ADD COLUMN "followers_total" integer;

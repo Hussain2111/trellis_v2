@@ -191,6 +191,27 @@ Three caveats, all of which the probe handles:
 **If it cannot be confirmed, the dashboard shows this metric unlabelled or not
 at all.** It does not guess.
 
+### Net follower change comes from a column this app writes, not from Meta
+
+Neither edge gives a usable net change:
+
+- `accounts.followers_count` is the profile's current total, with **no history**.
+- `follower_count` (the metric) reaches back ~30 days, and the evidence says it
+  is **not** a running total — it read 0 at both ends of a window on an account
+  holding ~4,872 followers, and its 30-day sum matched `FOLLOWER` exactly on two
+  separate runs. Subtracting its endpoints is meaningless.
+
+So the daily account sync snapshots `accounts.followers_count` into
+`account_daily.followers_total` against the Riyadh day it was read. That column
+IS a running total by construction, and the dashboard's 30-day change is
+computed from it. **Nothing is backfilled** — the series exists only from the
+first sync that wrote a row, and until there are two readings the change renders
+blank with the reason.
+
+**There is no per-person unfollow data anywhere in the Graph API.** No follower
+list, no follow or unfollow events, no webhook. The most this app can ever
+honestly say is that the total went down, and by how much.
+
 ## A trap that is not Meta's fault
 
 `lib/env.ts` reads `process.env` and nothing else. Vitest does not load `.env`,

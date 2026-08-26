@@ -22,11 +22,22 @@ export interface ThreadSummary {
  */
 export function ChatSidebar({ threads, activeId }: { threads: ThreadSummary[]; activeId: number }) {
   const router = useRouter();
-  const [busy, setBusy] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [confirming, setConfirming] = useState<number | null>(null);
+
+  /**
+   * Deleting used to wait on the request, then a navigation, then a full
+   * re-render of a dynamic page — three server round trips before the row you
+   * had already decided about left the screen. The row goes now and the request
+   * follows; if it fails the list comes back on the next render, which is the
+   * right way round for something the user has already committed to.
+   */
+  const [removed, setRemoved] = useState<number[]>([]);
+  const visible = threads.filter((thread) => !removed.includes(thread.id));
 
   async function newChat() {
-    if (busy) return;
-    setBusy(true);
+    if (creating) return;
+    setCreating(true);
     try {
       const res = await fetch('/api/chat/threads', {
         method: 'POST',
@@ -35,21 +46,21 @@ export function ChatSidebar({ threads, activeId }: { threads: ThreadSummary[]; a
       });
       const { thread } = await res.json();
       router.push(`/chat?thread=${thread.id}`);
-      router.refresh();
     } finally {
-      setBusy(false);
+      setCreating(false);
     }
   }
 
-  async function remove(id: number) {
-    setBusy(true);
-    try {
-      await fetch(`/api/chat/threads/${id}`, { method: 'DELETE' });
+  function remove(id: number) {
+    setConfirming(null);
+    setRemoved((ids) => [...ids, id]);
+    void fetch(`/api/chat/threads/${id}`, { method: 'DELETE' }).then(() => {
+      // Only leave the page when the thread you were reading is the one that
+      // went. Otherwise the list is already right and a navigation would be a
+      // round trip for nothing.
       if (id === activeId) router.push('/chat');
-      router.refresh();
-    } finally {
-      setBusy(false);
-    }
+      else router.refresh();
+    });
   }
 
   return (
@@ -57,7 +68,7 @@ export function ChatSidebar({ threads, activeId }: { threads: ThreadSummary[]; a
       <button
         type="button"
         onClick={() => void newChat()}
-        disabled={busy}
+        disabled={creating}
         className="flex items-center justify-center gap-2 rounded-xl border border-rule bg-card px-3 py-2.5 text-sm font-medium transition-colors hover:border-accent disabled:opacity-50"
       >
         <PlusIcon className="size-4" />
@@ -65,8 +76,37 @@ export function ChatSidebar({ threads, activeId }: { threads: ThreadSummary[]; a
       </button>
 
       <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto">
-        {threads.map((thread) => {
+        {visible.map((thread) => {
           const active = thread.id === activeId;
+
+          // A conversation is not recoverable once deleted, so the trash icon
+          // asks rather than acts. Inline, in the row itself — a modal for this
+          // is heavier than the decision.
+          if (confirming === thread.id) {
+            return (
+              <li
+                key={thread.id}
+                className="flex items-center gap-2 rounded-lg bg-accent-soft px-3 py-2 text-sm"
+              >
+                <span className="min-w-0 flex-1 truncate text-ink-muted">Delete this chat?</span>
+                <button
+                  type="button"
+                  onClick={() => remove(thread.id)}
+                  className="shrink-0 rounded-md px-2 py-1 text-xs font-semibold text-negative"
+                >
+                  Delete
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirming(null)}
+                  className="shrink-0 rounded-md px-2 py-1 text-xs text-ink-muted"
+                >
+                  Keep
+                </button>
+              </li>
+            );
+          }
+
           return (
             <li key={thread.id} className="group relative">
               <Link
@@ -83,8 +123,7 @@ export function ChatSidebar({ threads, activeId }: { threads: ThreadSummary[]; a
               </Link>
               <button
                 type="button"
-                onClick={() => void remove(thread.id)}
-                disabled={busy}
+                onClick={() => setConfirming(thread.id)}
                 aria-label={`Delete ${thread.title ?? 'this chat'}`}
                 className="absolute right-1.5 top-2 rounded-md p-1.5 text-ink-faint opacity-0 transition-opacity hover:text-negative focus-visible:opacity-100 group-hover:opacity-100"
               >

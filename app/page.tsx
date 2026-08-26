@@ -90,7 +90,7 @@ export default async function DashboardPage() {
               value={overview.followers ?? null}
               note={
                 followers.change === null
-                  ? 'No change yet — that needs two readings'
+                  ? followers.changeUnavailable
                   : `${formatChange(followers.change)} in 30 days`
               }
             />
@@ -108,10 +108,7 @@ export default async function DashboardPage() {
         </Panel>
 
         <Panel>
-          <PanelHeader
-            title="Last 30 days"
-            aside={sampleNote(followers.measured, followers.total, 'day')}
-          />
+          <PanelHeader title="Last 30 days" />
           <div className="grid divide-y divide-rule sm:grid-cols-2 sm:divide-x lg:grid-cols-3">
             {totals.map((metric) => (
               <Stat
@@ -141,9 +138,10 @@ export default async function DashboardPage() {
         ) : null}
 
         <p className="text-xs text-ink-faint">
-          Follower history goes back about 30 days and no further — Instagram serves no more, so the
-          series grows forward from here. {overview.coverage.postsWithInsights} of{' '}
-          {overview.coverage.posts} posts have performance data.
+          Instagram serves no follower history at all, so the change above is measured from readings
+          this app takes daily — it grows forward from the first sync, and there is nothing before
+          it. {overview.coverage.postsWithInsights} of {overview.coverage.posts} posts have
+          performance data.
         </p>
       </section>
     </main>

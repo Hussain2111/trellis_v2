@@ -108,8 +108,15 @@ export interface SeriesPoint {
  * not measured.
  */
 export async function followerSeries(accountId: number, days = 30) {
-  const points = await rows<{ day: string; value: number | null; missing: string | null }>(sql`
-    select day, follower_count as value,
+  const points = await rows<{
+    day: string;
+    total: number | null;
+    arrivals: number | null;
+    missing: string | null;
+  }>(sql`
+    select day,
+           followers_total as total,
+           follower_count as arrivals,
            (unavailable ->> 'follower_count') as missing
     from account_daily
     where account_id = ${accountId}
@@ -117,13 +124,23 @@ export async function followerSeries(accountId: number, days = 30) {
     limit ${days}
   `);
 
-  const known = points.filter((p) => p.value != null);
+  const withTotal = points.filter((p) => p.total != null);
+  points.reverse();
+
   return {
     days: points.length,
-    measured: known.length,
-    points: points.reverse(),
+    measured: withTotal.length,
+    points,
     asOf: points[points.length - 1]?.day ?? null,
-    note: 'Meta serves at most ~30 days of follower history. Older days were never available.',
+    // Two different quantities, and conflating them is how a wrong number gets
+    // stated confidently. Said here so the model cannot subtract the wrong one.
+    note:
+      '`total` is the profile follower count as this app recorded it that day — a running total, ' +
+      "and the only column a net change may be computed from. `arrivals` is Meta's own daily " +
+      'follower_count metric, whose meaning is NOT settled: the evidence fits gross new follows ' +
+      'per day rather than a running total, so it must never be subtracted end to end. Meta serves ' +
+      'at most ~30 days of it and no history at all for the profile total, so `total` exists only ' +
+      'from the day this app first recorded it.',
   };
 }
 

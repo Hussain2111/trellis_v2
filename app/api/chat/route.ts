@@ -81,7 +81,17 @@ export async function POST(request: Request): Promise<Response> {
       system:
         (await buildSystemPrompt(accountId)) +
         (sourceCardId
-          ? `\n\nThis conversation began from dashboard note ${sourceCardId}. Call getInsightCard with cardId ${sourceCardId} first, and say when it was generated rather than implying it is current.`
+          ? [
+              '',
+              '',
+              // The id is an instruction to the tool, never a name for the note.
+              // Naming it in this sentence is what produced answers opening
+              // "Dashboard note 1 (generated today) highlights…" — a preamble
+              // about where the conversation started, in front of the answer
+              // that was actually asked for.
+              `This conversation was opened from a note on the dashboard. Call getInsightCard with cardId ${sourceCardId} before answering, so its figures come back as data you may restate.`,
+              'Do NOT open with a preamble about the note, its number, or when it was generated. Answer the question that was asked. Mention the note only where it bears on the answer, and then as "the note you opened" — it has no number the reader can see.',
+            ].join('\n')
           : ''),
       messages: history.map((m) => ({
         role: m.role as 'user' | 'assistant',
