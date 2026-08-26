@@ -86,6 +86,11 @@ function json(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200 });
 }
 
+async function countOf(query: ReturnType<typeof sql>): Promise<number> {
+  const rows = (await db().execute(query)) as unknown as { n: number }[];
+  return rows[0]?.n ?? 0;
+}
+
 async function driveToCompletion(
   maxTicks: number,
 ): Promise<{ ticks: number; done: boolean; stages: string[] }> {
@@ -122,15 +127,10 @@ describe('the sync loop, driven as the runner drives it', () => {
     // The real thing spent 35 minutes and 40 iterations without finishing.
     expect(run.ticks).toBeLessThan(15);
 
-    const [{ n }] = (await db().execute<{ n: number }>(
-      sql`select count(*)::int as n from posts`,
-    )) as unknown as { n: number }[];
-    expect(n).toBe(TOTAL_POSTS);
-
-    const [{ n: insights }] = (await db().execute<{ n: number }>(
-      sql`select count(*)::int as n from post_insights where checkpoint = 'latest'`,
-    )) as unknown as { n: number }[];
-    expect(insights).toBe(TOTAL_POSTS);
+    expect(await countOf(sql`select count(*)::int as n from posts`)).toBe(TOTAL_POSTS);
+    expect(
+      await countOf(sql`select count(*)::int as n from post_insights where checkpoint = 'latest'`),
+    ).toBe(TOTAL_POSTS);
   });
 
   it('finishes even when Meta has no account data at all', async () => {

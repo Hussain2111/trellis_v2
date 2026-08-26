@@ -54,11 +54,16 @@ npm run db:migrate
 npm run dev
 ```
 
-Checks:
+Checks — one command, the same set Vercel runs:
 
 ```bash
-npm run typecheck && npm run lint && npm test && npm run build
+npm run verify
 ```
+
+Run this before every push. It exists because running a _subset_ — lint and
+tests but not typecheck — once put a type error into a production deploy that
+had passed local checks. There is no longer a way to run "most of" the checks
+by accident.
 
 The dev server process is `next-server`, not `next start` — `pkill -f "next
 start"` does nothing and you will spend a round testing stale code. Use
