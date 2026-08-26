@@ -29,7 +29,9 @@ The outcome this plan is aimed at: a deployed skeleton meeting real infrastructu
 
 **Stage 2 — probes run four times. Q1, Q2, Q3a and Q3b are all answered.** 30 days is a per-request range cap, not a horizon; `reach` returns data at least a year back, so the backfill pages backwards. Two things remain, neither blocking: **Q3c** — `follower_count`'s real depth, which a probe fallback masked (Task 2.11) — and **Q2a**, which needs seven days of elapsed time (Task 2.10). `docs/graph-api.md` exists with `_pending_` blanks for both.
 
-**Stage 3 — the schema is written and applied** (Task 3.1), 13 tables, with a test reading `information_schema` to fail any metric column that acquires a default or loses its nullability. The provider interface, validator and time module are in. Next is Task 3.3, the sync layer.
+**Stage 3 — DONE, and unproven against real data.** The schema (3.1, 13 tables), backups (3.2), the Graph client and sync layer including the one-time backfill (3.3), the provider interface (3.4), the validator (3.5) and the design tokens (3.6). 69 tests, all against a real Postgres and a fake `fetch`.
+
+**The sync layer has never met the Graph API.** It is written from probe output rather than documentation, which is the best available substitute and still not the same thing. Stage 4 deliberately does not start until it has run once for real — building three surfaces on an unproven data layer is the same mistake as nine stages before a first deployment, in a different dimension.
 
 **Not started:** Stages 4, 5, 6.
 
