@@ -21,7 +21,8 @@
     "probe:account-insights": "tsx scripts/probe/account-insights.ts",
     "setup:account": "tsx scripts/bootstrap-account.ts",
     "status": "tsx scripts/status.ts",
-    "verify": "npm run typecheck && npm run lint && npm run format:check && npm test && npm run build"
+    "verify": "npm run typecheck && npm run lint && npm run format:check && npm run build",
+    "verify:full": "npm run verify && npm test"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.50",

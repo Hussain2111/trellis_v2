@@ -54,93 +54,35 @@ npm run db:migrate
 npm run dev
 ```
 
-Checks — one command, the same set Vercel runs:
+Checks — one command, matching exactly what Vercel runs on deploy:
 
 ```bash
 npm run verify
 ```
 
-Run this before every push. It exists because running a _subset_ — lint and
-tests but not typecheck — once put a type error into a production deploy that
-had passed local checks. There is no longer a way to run "most of" the checks
-by accident.
+Run it before every push. It exists because running a _subset_ — lint and tests
+but not typecheck — once put a type error into a production deploy that had
+passed local checks.
 
-> **`npm test` needs a LOCAL Postgres, and refuses anything else.** The database
-> tests begin with `truncate ... cascade`, and vitest loads `.env` — which on a
-> machine that also operates this app points at production Supabase. A guard in
-> `tests/guard.setup.ts` stops the suite with an explanation rather than
-> destroying every synced post and every day of follower history that Meta will
-> not serve twice.
+It does **not** include the test suite, and that is deliberate rather than a
+compromise: Vercel's build does not run tests either, so this matches what
+actually gates a deploy. CI runs the tests on every push, against its own
+throwaway database.
+
+If you do have a local Postgres, `npm run verify:full` adds them.
+
+> **The tests refuse to run against a non-local database.** They begin with
+> `truncate ... cascade`, and vitest loads `.env` — which on a machine that also
+> operates this app points at production Supabase. A guard in
+> `tests/guard.setup.ts` stops the suite rather than destroying 246 posts and
+> the follower history Meta will not serve twice.
 >
-> Point it somewhere disposable in `.env.test.local` (git-ignored, vitest loads
-> it):
+> To run them locally, point somewhere disposable in `.env.test.local`
+> (git-ignored, vitest loads it):
 >
 > ```
 > DATABASE_URL=postgres://postgres:postgres@localhost:5432/trellis_test
 > ```
->
-> With no local Postgres, skip the tests and let CI run them — CI has its own
-> throwaway database. `npm run typecheck && npm run lint && npm run build` covers
-> everything else.
-
-The dev server process is `next-server`, not `next start` — `pkill -f "next
-start"` does nothing and you will spend a round testing stale code. Use
-`fuser -k 3000/tcp`.
-
-## What the probes established
-
-The Graph API's real behaviour is in [`docs/graph-api.md`](docs/graph-api.md),
-written from probe output rather than documentation. The three findings that
-shape everything else:
-
-- **Insights have no lookback boundary** — 242 of 243 posts return data, the
-  oldest 1,907 days old. The chat has five years of history on day one.
-- **But Meta serves cumulative totals and no curve.** A curve exists only where
-  it was sampled at the time, so `t24`/`t48`/`t7d` can never exist for a post
-  published before this app did. Those carry `never_sampled`, which is a
-  different claim from zero, from "too new", and from Meta declining.
-- **30 days is a per-request range cap, not a horizon.** History is walked by
-  paging backwards in 30-day windows.
-
-## First run
-
-Once, in order. Each step tells you whether the next one can work.
-
-```bash
-git pull
-npm install
-npm run setup:account      # verifies the token, creates the account row
-```
-
-`setup:account` is the first thing that touches the real Graph API and the real
-database together, so it doubles as a first-contact check — a wrong token, a
-short scope list or a `DATABASE_URL` pointing somewhere unexpected all surface
-here rather than part-way through a 243-post walk. It is safe to re-run.
-
-It also prints today's `followers_count` in a box. **Write that number down** —
-it starts the seven-day check that decides whether follows/unfollows can be
-labelled at all.
-
-Then, on GitHub: **Actions → Sync → Run workflow**.
-
-Afterwards, to see what actually landed:
-
-```bash
-npm run status
-```
-
-Read-only. It reports counts, date ranges, per-metric coverage, and **the reason
-behind every gap** — because "0 rows" and "we never asked" and "Meta had
-nothing" are three different situations and only one of them is a problem.
-
-It calls `/api/sync` repeatedly until the response says `"done":true`. Each
-call does a bounded amount of work and returns; the runner calls it back. Expect
-several iterations — the one-time backfill walks 243 posts and is deliberately
-unhurried. Watch the `stats` in each iteration's output: they carry request
-counts and Meta's own rate-limit usage.
-
-If it hits the iteration cap without finishing, that is not a failure. The
-cursor is stored and the next run resumes from it.
 
 ## Scheduling
 
