@@ -16,7 +16,7 @@ const ITEMS = [
   { href: '/calendar', label: 'Calendar' },
 ] as const;
 
-export function Nav() {
+export function Nav({ overdue = 0 }: { overdue?: number }) {
   const pathname = usePathname();
 
   return (
@@ -45,6 +45,11 @@ export function Nav() {
                 }`}
               >
                 {item.label}
+                {item.href === '/calendar' && overdue > 0 ? (
+                  <span className="ml-1.5 inline-flex min-w-[1.15rem] items-center justify-center rounded-full bg-[--color-accent] px-1 text-[10px] font-semibold text-white">
+                    {overdue}
+                  </span>
+                ) : null}
               </Link>
             </li>
           );
