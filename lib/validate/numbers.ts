@@ -42,7 +42,12 @@ export function allowedNumbers(payload: unknown): Set<string> {
       // Numbers that arrived as strings — postgres aggregates do this, and a
       // count that came back as "17" is still a computed count.
       const parsed = Number(node);
-      if (node.trim() !== '' && Number.isFinite(parsed)) admit(parsed);
+      if (node.trim() !== '' && Number.isFinite(parsed)) return admit(parsed);
+      // Dates arrive as strings too. A payload holding a post published
+      // 2021-06-04 backs an answer that says "back to 2021" — the year is in
+      // the data, it just is not a number the row stored as one.
+      const date = /^(\d{4})-(\d{2})-(\d{2})/.exec(node.trim());
+      if (date) for (const part of date.slice(1)) admit(Number(part));
       return;
     }
     if (Array.isArray(node)) return node.forEach(walk);
@@ -72,11 +77,52 @@ function canonical(value: number): string {
   return String(value === 0 ? 0 : value);
 }
 
-/** Every number appearing in a piece of model output. */
+/**
+ * Not every digit is a claim, and treating them all as claims cost real answers.
+ *
+ * A list of posts carries a permalink and a date on every line. Neither is a
+ * statistic — one is an address and the other is when something happened — but
+ * both are full of digits that no aggregate query returns. So a correct answer
+ * listing twenty posts had every one of its lines dropped, leaving the headings
+ * standing over nothing. The figures the guarantee is actually about — reach,
+ * saves, medians, counts — are untouched by this; they are still checked
+ * against what a tool returned, and still dropped when they are not there.
+ */
+const URL_PATTERN = /\bhttps?:\/\/\S+|\bwww\.\S+/gi;
+
+const MONTH =
+  'Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?';
+
+const DATE_PATTERNS: RegExp[] = [
+  // 2024-03-15, 2024/03/15 — how a date arrives from the database.
+  /\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b/g,
+  /\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/g,
+  // 15 March 2024, 15th Mar
+  new RegExp(`\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:${MONTH})\\b(?:,?\\s+\\d{4})?`, 'gi'),
+  // March 15, 2024
+  new RegExp(`\\b(?:${MONTH})\\s+\\d{1,2}(?:st|nd|rd|th)?\\b(?:,?\\s+\\d{4})?`, 'gi'),
+  // March 2024
+  new RegExp(`\\b(?:${MONTH})\\s+\\d{4}\\b`, 'gi'),
+];
+
+/**
+ * A bare four-digit year is deliberately NOT exempt here. "2,050 accounts
+ * reached" and "2050" are the same digits, and exempting every year-shaped
+ * number would open a hole wide enough to drive an invented reach figure
+ * through. A year only passes when the payload actually contains a date in that
+ * year — see `allowedNumbers`.
+ */
+function withoutAddressesAndDates(text: string): string {
+  let out = text.replace(URL_PATTERN, ' ');
+  for (const pattern of DATE_PATTERNS) out = out.replace(pattern, ' ');
+  return out;
+}
+
+/** Every number appearing in a piece of model output that could be a claim. */
 export function numbersIn(text: string): number[] {
   const found: number[] = [];
   // Thousands separators are presentation. "1,248" and 1248 are one number.
-  const normalised = text.replace(/(\d),(?=\d{3}\b)/g, '$1');
+  const normalised = withoutAddressesAndDates(text).replace(/(\d),(?=\d{3}\b)/g, '$1');
   for (const match of normalised.matchAll(/-?\d+(?:\.\d+)?/g)) {
     const value = Number(match[0]);
     if (Number.isFinite(value)) found.push(value);

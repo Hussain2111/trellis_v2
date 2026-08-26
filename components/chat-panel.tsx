@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { Markdown } from './markdown';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -19,11 +20,13 @@ interface Message {
 export function ChatPanel({
   threadId,
   initial,
-  sourceCardId,
+  fromNote = false,
 }: {
   threadId: number;
   initial: Message[];
-  sourceCardId?: number | null;
+  /** Whether this thread was opened from a dashboard note. Display only — the
+      server reads the card reference off the thread row rather than from here. */
+  fromNote?: boolean;
 }) {
   const [messages, setMessages] = useState<Message[]>(initial);
   const [input, setInput] = useState('');
@@ -48,13 +51,7 @@ export function ChatPanel({
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        // The card reference travels with the first message only. The chat
-        // fetches its evidence itself rather than being handed it.
-        body: JSON.stringify({
-          threadId,
-          message: text,
-          sourceCardId: messages.length === 0 ? (sourceCardId ?? undefined) : undefined,
-        }),
+        body: JSON.stringify({ threadId, message: text }),
       });
       const body = await res.json();
 
@@ -80,8 +77,8 @@ export function ChatPanel({
           <div className="rounded-xl border border-[--color-rule] bg-[--color-card] px-5 py-8 text-center">
             <p className="text-sm font-medium text-[--color-ink-muted]">Ask about your account</p>
             <p className="mx-auto mt-2 max-w-md text-sm text-[--color-ink-faint]">
-              {sourceCardId
-                ? 'Ask about the note you just opened — it will look up what that note was based on.'
+              {fromNote
+                ? 'Ask about the note above — it will look up what that note was based on.'
                 : 'Every number comes from your own data or it doesn’t get said.'}
             </p>
           </div>
@@ -99,11 +96,16 @@ export function ChatPanel({
                   : 'border border-[--color-rule] bg-[--color-card]'
               }`}
             >
-              <p className="whitespace-pre-wrap">{message.content}</p>
+              {message.role === 'assistant' ? (
+                <Markdown text={message.content} />
+              ) : (
+                <p className="whitespace-pre-wrap">{message.content}</p>
+              )}
               {message.dropped ? (
                 <p className="mt-2 border-t border-[--color-rule] pt-2 text-xs text-[--color-ink-faint]">
-                  {message.dropped} statement{message.dropped === 1 ? '' : 's'} removed — the
-                  figures weren&rsquo;t in the data.
+                  {message.dropped} line{message.dropped === 1 ? '' : 's'} removed — they stated
+                  figures that weren&rsquo;t in what the queries returned, and this app drops those
+                  rather than showing them.
                 </p>
               ) : null}
             </div>

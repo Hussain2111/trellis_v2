@@ -1,8 +1,8 @@
-import { desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/client';
 import { accounts, chatMessages, chatThreads } from '../db/schema';
 import { renderChatSystem } from '../prompts/chat-system';
-import { accountOverview } from './queries';
+import { accountOverview, insightCard } from './queries';
 
 export async function selfAccountId(): Promise<number | null> {
   const [row] = await db().select({ id: accounts.id }).from(accounts).limit(1);
@@ -24,6 +24,35 @@ export async function createThread(accountId: number, sourceCardId?: number) {
     .values({ accountId, sourceCardId: sourceCardId ?? null })
     .returning();
   return row!;
+}
+
+/**
+ * Opening a dashboard note starts a conversation that already contains it.
+ *
+ * The first version created an empty thread and navigated to it, so the note
+ * you had just clicked appeared nowhere, the previous conversation was no
+ * longer the most recent one, and the whole thing read as though the chat had
+ * been wiped. The note is now seeded as the assistant's opening turn: it is on
+ * screen, it is what you reply to, and nothing else is disturbed.
+ *
+ * What is seeded is the note's own already-validated text — never its evidence.
+ * The figures still have to come back through `getInsightCard` before the model
+ * may restate them, which is what the validator checks the next answer against.
+ */
+export async function createThreadFromCard(accountId: number, cardId: number) {
+  const card = await insightCard(accountId, cardId);
+  const thread = await createThread(accountId, cardId);
+
+  if (!card.found) return thread;
+
+  await appendMessage({
+    threadId: thread.id,
+    role: 'assistant',
+    content: `${card.body}\n\nThat note was ${card.freshness}. Ask me anything about it — what it was based on, which posts, or what to do about it.`,
+  });
+
+  await titleThread(thread.id, card.body);
+  return thread;
 }
 
 export async function threadMessages(threadId: number) {
@@ -58,11 +87,29 @@ export async function appendMessage(input: {
 
 export async function titleThread(threadId: number, from: string) {
   const title = from.trim().slice(0, 70) + (from.trim().length > 70 ? '…' : '');
-  await db().update(chatThreads).set({ title }).where(eq(chatThreads.id, threadId));
+  // Never rename a thread that already has a name — a thread opened from a note
+  // is titled at creation, and the first thing you type in it is a follow-up
+  // question, not a better title for what you were shown.
+  await db()
+    .update(chatThreads)
+    .set({ title })
+    .where(and(eq(chatThreads.id, threadId), isNull(chatThreads.title)));
 }
 
-export async function deleteThread(threadId: number) {
-  await db().delete(chatThreads).where(eq(chatThreads.id, threadId));
+export async function deleteThread(accountId: number, threadId: number) {
+  await db()
+    .delete(chatThreads)
+    .where(and(eq(chatThreads.accountId, accountId), eq(chatThreads.id, threadId)));
+}
+
+/** The thread's own card reference, read from the row rather than trusted from the client. */
+export async function threadCardId(threadId: number): Promise<number | null> {
+  const [row] = await db()
+    .select({ sourceCardId: chatThreads.sourceCardId })
+    .from(chatThreads)
+    .where(eq(chatThreads.id, threadId))
+    .limit(1);
+  return row?.sourceCardId ?? null;
 }
 
 /** Built fresh every turn from real state, so it can never describe a stale account. */

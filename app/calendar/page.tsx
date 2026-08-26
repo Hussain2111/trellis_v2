@@ -1,9 +1,8 @@
 import { selfAccountId } from '@/lib/chat/threads';
-import { groupByWeek, listEntries } from '@/lib/calendar/entries';
-import { CalendarView, type Entry } from '@/components/calendar-view';
-import { NewEntryForm } from '@/components/new-entry-form';
+import { listEntries } from '@/lib/calendar/entries';
+import { MonthCalendar, type Entry } from '@/components/month-calendar';
 import { EmptyState, Panel, PanelHeader } from '@/components/ui/primitives';
-import { formatRiyadh, formatRiyadhDate } from '@/lib/time';
+import { formatRiyadh, riyadhDayKey, riyadhMonthKey, riyadhTimeOfDay } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,31 +21,28 @@ export default async function CalendarPage() {
     );
   }
 
+  const now = new Date();
   const entries = await listEntries(accountId);
   const overdue = entries.filter((e) => e.state === 'overdue');
 
-  const weeks = groupByWeek(entries).map((week) => ({
-    label: `Week of ${formatRiyadhDate(new Date(week.weekStart))}`,
-    entries: week.entries.map((entry): Entry => ({
-      id: entry.id,
-      scheduledFor: entry.scheduledFor.toISOString(),
-      scheduledLabel: formatRiyadh(entry.scheduledFor),
-      state: entry.state,
-      format: entry.format,
-      title: entry.title,
-      hook: entry.hook,
-      caption: entry.caption,
-      hashtags: entry.hashtags,
-      notes: entry.notes,
-    })),
+  // Keyed to Riyadh days here, on the server, so the grid never has to know
+  // what timezone the browser drawing it is in.
+  const forGrid: Entry[] = entries.map((entry) => ({
+    id: entry.id,
+    dayKey: riyadhDayKey(entry.scheduledFor),
+    timeLabel: riyadhTimeOfDay(entry.scheduledFor),
+    state: entry.state,
+    format: entry.format,
+    title: entry.title,
+    hook: entry.hook,
+    caption: entry.caption,
+    hashtags: entry.hashtags,
+    notes: entry.notes,
   }));
 
   return (
     <main className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <Header />
-        <NewEntryForm />
-      </div>
+      <Header />
 
       {overdue.length > 0 ? (
         <div className="rounded-xl border border-[--color-rule] bg-[--color-accent-soft] px-5 py-4">
@@ -62,17 +58,11 @@ export default async function CalendarPage() {
         </div>
       ) : null}
 
-      {weeks.length === 0 ? (
-        <Panel>
-          <PanelHeader title="Nothing scheduled" />
-          <EmptyState title="No posts planned">
-            Add a date and a draft. Every field gets a copy button, so posting means pasting rather
-            than retyping.
-          </EmptyState>
-        </Panel>
-      ) : (
-        <CalendarView weeks={weeks} />
-      )}
+      <MonthCalendar
+        entries={forGrid}
+        initialMonth={riyadhMonthKey(now)}
+        todayKey={riyadhDayKey(now)}
+      />
     </main>
   );
 }
@@ -82,7 +72,8 @@ function Header() {
     <header>
       <h1 className="text-2xl font-semibold tracking-tight">Calendar</h1>
       <p className="mt-1 text-sm text-[--color-ink-muted]">
-        What you plan to post, and when. Times are Riyadh.
+        What you plan to post, and when. Press the <span className="font-medium">+</span> on a day
+        to add a draft to it.
       </p>
     </header>
   );

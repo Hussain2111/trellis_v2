@@ -196,6 +196,62 @@ describe('stripUnbackedSentences', () => {
   });
 });
 
+describe('addresses and dates are not claims', () => {
+  // The failure this fixes: an answer listing posts carries a permalink and a
+  // date on every line. Both are full of digits no aggregate returns, so every
+  // line was dropped and the headings were left standing over nothing.
+  it('ignores the digits inside a permalink', () => {
+    const allowed = allowedNumbers(payload);
+    expect(
+      unbackedNumbers('Reached 1248 — https://www.instagram.com/p/C8xQ2740abc/', allowed),
+    ).toEqual([]);
+  });
+
+  it('ignores dates in the shapes a model writes them', () => {
+    const allowed = allowedNumbers(payload);
+    for (const written of [
+      'Posted 2024-03-15, reached 1248 accounts.',
+      'Posted 15 March 2024, reached 1248 accounts.',
+      'Posted March 15, 2024 — 1248 accounts.',
+      'Posted 15 Mar, reached 1248 accounts.',
+      'Your March 2024 carousel reached 1248 accounts.',
+    ]) {
+      expect(unbackedNumbers(written, allowed), written).toEqual([]);
+    }
+  });
+
+  it('keeps a whole list item that carries a date and a link', () => {
+    const answer = [
+      '1. The serum routine — 1248 saves — posted 15 March 2024 — https://instagram.com/p/C8xQ27/',
+      '2. The cleanser comparison — 903 saves — posted 2 April 2024 — https://instagram.com/p/C9aB13/',
+    ].join('\n');
+    const { text, dropped } = stripUnbackedSentences(answer, payload);
+    expect(text).toBe(answer);
+    expect(dropped).toHaveLength(0);
+  });
+
+  it('still drops an invented figure sitting next to a real date', () => {
+    const { dropped } = stripUnbackedSentences(
+      'On 15 March 2024 you reached 9999 accounts.',
+      payload,
+    );
+    expect(dropped[0]?.figures).toEqual([9999]);
+  });
+
+  // A bare year is not exempt — "2,050 accounts reached" is the same digits as
+  // a year, and blanket-exempting them would let an invented reach figure past.
+  it('backs a bare year only when the payload holds a date in it', () => {
+    expect(unbackedNumbers('back to 2021', allowedNumbers(payload))).toEqual([2021]);
+    expect(unbackedNumbers('back to 2021', allowedNumbers({ oldestPost: '2021-06-04' }))).toEqual(
+      [],
+    );
+  });
+
+  it('does not exempt a reach figure that happens to look like a year', () => {
+    expect(unbackedNumbers('reached 2050 accounts', allowedNumbers(payload))).toEqual([2050]);
+  });
+});
+
 describe('splitSentences', () => {
   it('does not split on a list marker', () => {
     expect(splitSentences('1. The serum routine reached 1248 accounts.')).toEqual([

@@ -1,16 +1,18 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { chatThreads } from '@/lib/db/schema';
 import { ChatPanel } from '@/components/chat-panel';
+import { ChatSidebar, type ThreadSummary } from '@/components/chat-sidebar';
 import { createThread, listThreads, selfAccountId, threadMessages } from '@/lib/chat/threads';
 import { EmptyState, Panel, PanelHeader } from '@/components/ui/primitives';
+import { relativeRiyadh } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
 
 export default async function ChatPage({
   searchParams,
 }: {
-  searchParams: Promise<{ thread?: string; card?: string }>;
+  searchParams: Promise<{ thread?: string }>;
 }) {
   const accountId = await selfAccountId();
 
@@ -31,38 +33,64 @@ export default async function ChatPage({
 
   const params = await searchParams;
   const requested = params.thread ? Number(params.thread) : null;
-  const cardId = params.card ? Number(params.card) : null;
 
-  let thread = null;
-  if (requested) {
+  const threads = await listThreads(accountId);
+
+  // A requested thread must belong to this account; anything else falls back to
+  // the most recent one. Visiting /chat never creates a thread unless there are
+  // none at all — a page that spawns an empty conversation every time you look
+  // at it is how the thread list filled with noise.
+  let thread = requested ? (threads.find((t) => t.id === requested) ?? null) : null;
+  if (!thread && requested) {
     const [found] = await db()
       .select()
       .from(chatThreads)
-      .where(eq(chatThreads.id, requested))
+      .where(and(eq(chatThreads.accountId, accountId), eq(chatThreads.id, requested)))
       .limit(1);
     thread = found ?? null;
   }
-  if (!thread) {
-    const threads = await listThreads(accountId);
-    thread = threads[0] ?? (await createThread(accountId));
-  }
+  thread ??= threads[0] ?? (await createThread(accountId));
 
   const history = await threadMessages(thread.id);
+
+  const summaries: ThreadSummary[] = (
+    threads.some((t) => t.id === thread.id) ? threads : [thread, ...threads]
+  ).map((t) => ({
+    id: t.id,
+    title: t.title,
+    fromNote: t.sourceCardId !== null,
+    updatedLabel: relativeRiyadh(t.updatedAt),
+  }));
 
   return (
     <main className="space-y-6">
       <Header />
-      <ChatPanel
-        threadId={thread.id}
-        // A card reference, never the card's evidence. The chat resolves it
-        // through a tool so its figures arrive as a tool result — which is what
-        // the validator checks the answer against.
-        sourceCardId={cardId ?? thread.sourceCardId ?? null}
-        initial={history.map((m) => ({
-          role: m.role as 'user' | 'assistant',
-          content: m.content,
-        }))}
-      />
+
+      <div className="lg:grid lg:grid-cols-[13rem_minmax(0,1fr)] lg:gap-8">
+        {/* Desktop: a permanent rail. Mobile: a disclosure, because a phone
+            screen belongs to the conversation, not to a list of them. */}
+        <aside className="hidden lg:block">
+          <ChatSidebar threads={summaries} activeId={thread.id} />
+        </aside>
+
+        <details className="mb-4 rounded-xl border border-[--color-rule] bg-[--color-card] px-4 py-3 lg:hidden">
+          <summary className="cursor-pointer text-sm font-medium">
+            Chats <span className="text-[--color-ink-faint]">({summaries.length})</span>
+          </summary>
+          <div className="mt-3">
+            <ChatSidebar threads={summaries} activeId={thread.id} />
+          </div>
+        </details>
+
+        <ChatPanel
+          threadId={thread.id}
+          initial={history.map((m) => ({
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+          }))}
+          fromNote={thread.sourceCardId !== null}
+        />
+      </div>
     </main>
   );
 }

@@ -1,11 +1,12 @@
 import { generateObject } from 'ai';
 import { z } from 'zod';
-import { eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { db } from '../db/client';
 import { insightBatches, insightCards } from '../db/schema';
 import { resolveModel } from '../model/provider';
 import { validateClaims } from '../validate/numbers';
 import { buildCardPayload } from './payload';
+import { postsByIds } from '../chat/queries';
 
 /**
  * SQL computes → the model interprets → code validates → the result is cached.
@@ -33,16 +34,26 @@ const cardSchema = z.object({
 
 const SYSTEM = [
   'You write short, specific notes for an Instagram creator about their own account.',
+  'They are not an analyst. They will read this on a phone, between other things.',
   '',
   'Each note is an OPPORTUNITY — something they could do — not a metric readout.',
   '"Your carousels reach 40% more people than your reels, but you post half as many"',
   'is a note. "Your reach was 3,961" is not.',
   '',
+  'HOW TO WRITE ONE:',
+  '- Lead with the thing to do, then the evidence for it. Not the other way round.',
+  '- Plain words for measures: "accounts reached", "saves", "people who engaged".',
+  '  Never the raw field names, and never a word they would have to look up.',
+  '- NEVER refer to a post by a number or an id. "Post 94" means nothing to them —',
+  '  it is a row number in a database they have never seen. Say WHEN it went up and',
+  '  WHAT it was about: "your March carousel on double cleansing". Put the ids in',
+  '  citedPostIds instead; they are shown as links to the real posts.',
+  '- Say what the comparison is against. "Better than your usual" needs a "usual".',
+  '',
   'HARD RULES:',
   '- Every number you write must appear in the data you were given. Do not compute,',
   '  do not round beyond one decimal, do not estimate. A number that is not in the',
   '  data will be deleted before anyone sees it.',
-  '- Cite the post ids a note is about, when it is about specific posts.',
   '- Views, interactions and accounts-engaged were redefined by Instagram recently.',
   '  Do not draw trends through them across long periods.',
   '- Reach counts unique accounts. Never add it up across days.',
@@ -138,21 +149,21 @@ export async function generateInsightCards(accountId: number): Promise<GenerateR
   return { batchId: batch!.id, kept: kept.length, dropped: dropped.length };
 }
 
-/** The most recent batch's cards, for rendering. Never generates. */
+/**
+ * The most recent batch's cards, for rendering. Never generates.
+ *
+ * One query for the batch, one for its cards, one to resolve the posts they
+ * cite. It used to be three queries for the batch alone — including a read of
+ * every batch ever generated, sorted in memory to find the newest — which is
+ * the sort of thing that is free on day one and quietly is not later.
+ */
 export async function latestCards(accountId: number) {
-  const [batch] = await db()
+  const [newest] = await db()
     .select()
     .from(insightBatches)
     .where(eq(insightBatches.accountId, accountId))
-    .orderBy(insightBatches.generatedAt)
+    .orderBy(desc(insightBatches.generatedAt))
     .limit(1);
-
-  const batches = await db()
-    .select()
-    .from(insightBatches)
-    .where(eq(insightBatches.accountId, accountId));
-  const newest =
-    batches.sort((a, b) => b.generatedAt.getTime() - a.generatedAt.getTime())[0] ?? batch;
 
   if (!newest) return { batch: null, cards: [] };
 
@@ -162,5 +173,18 @@ export async function latestCards(accountId: number) {
     .where(eq(insightCards.batchId, newest.id))
     .orderBy(insightCards.rank);
 
-  return { batch: newest, cards };
+  // Resolved once for the whole batch rather than per card.
+  const ids = [...new Set(cards.flatMap((card) => card.citedPostIds ?? []))];
+  const posts = await postsByIds(accountId, ids);
+  const byId = new Map(posts.map((post) => [post.id, post]));
+
+  return {
+    batch: newest,
+    cards: cards.map((card) => ({
+      ...card,
+      citedPosts: (card.citedPostIds ?? [])
+        .map((id) => byId.get(id))
+        .filter((post): post is (typeof posts)[number] => post !== undefined),
+    })),
+  };
 }

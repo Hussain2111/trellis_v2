@@ -341,6 +341,31 @@ export async function recentPosts(accountId: number, limit = 10, format?: string
 }
 
 /**
+ * Posts by id, so a note can say which posts it means in words a person knows.
+ *
+ * Nothing on screen should ever say "post 94". That number is a row id in this
+ * app's own database — it is not on Instagram, it is not in the creator's head,
+ * and there is no way for them to work out which post it refers to. What they
+ * know a post by is when it went up and what it was about.
+ */
+export async function postsByIds(accountId: number, ids: number[]) {
+  if (ids.length === 0) return [];
+  return rows<{
+    id: number;
+    permalink: string | null;
+    published: string | null;
+    format: string;
+    caption: string | null;
+  }>(sql`
+    select id, permalink, published_at::date::text as published,
+           media_type as format, left(caption, 120) as caption
+    from posts
+    where account_id = ${accountId} and id = any(${ids})
+    order by published_at desc nulls last
+  `);
+}
+
+/**
  * One insight card, re-resolved.
  *
  * This is the chat/dashboard contract. Clicking a note passes a REFERENCE, and

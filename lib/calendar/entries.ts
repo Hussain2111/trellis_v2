@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, lte } from 'drizzle-orm';
+import { and, asc, count, eq, gte, lt, lte } from 'drizzle-orm';
 import { db } from '../db/client';
 import { calendarEntries, type CalendarEntry } from '../db/schema';
 import { entryState, riyadhWeekStart, type EntryState } from '../time';
@@ -63,12 +63,24 @@ export function groupByWeek(
     .sort((a, b) => a.weekStart.localeCompare(b.weekStart));
 }
 
+/**
+ * Counted in the database rather than by reading every planned entry and
+ * filtering in memory. `overdue` is the one derived state expressible in SQL —
+ * planned, and its time has passed — so the count costs one round trip and
+ * carries no rows back with it.
+ */
 export async function overdueCount(accountId: number, now = new Date()): Promise<number> {
-  const rows = await db()
-    .select()
+  const [row] = await db()
+    .select({ n: count() })
     .from(calendarEntries)
-    .where(and(eq(calendarEntries.accountId, accountId), eq(calendarEntries.status, 'planned')));
-  return rows.filter((row) => decorate(row, now).state === 'overdue').length;
+    .where(
+      and(
+        eq(calendarEntries.accountId, accountId),
+        eq(calendarEntries.status, 'planned'),
+        lt(calendarEntries.scheduledFor, now),
+      ),
+    );
+  return row?.n ?? 0;
 }
 
 export interface EntryInput {

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { createThread, listThreads, selfAccountId } from '@/lib/chat/threads';
+import { createThread, createThreadFromCard, listThreads, selfAccountId } from '@/lib/chat/threads';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,5 +18,11 @@ export async function POST(request: Request): Promise<Response> {
   const parsed = bodySchema.safeParse(await request.json().catch(() => ({})));
   const sourceCardId = parsed.success ? parsed.data.sourceCardId : undefined;
 
-  return Response.json({ thread: await createThread(accountId, sourceCardId) });
+  // A thread opened from a note starts with the note in it. A thread opened
+  // from the New chat button starts empty.
+  const thread = sourceCardId
+    ? await createThreadFromCard(accountId, sourceCardId)
+    : await createThread(accountId);
+
+  return Response.json({ thread });
 }

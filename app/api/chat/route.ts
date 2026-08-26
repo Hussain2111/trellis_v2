@@ -8,6 +8,7 @@ import {
   buildSystemPrompt,
   callsToday,
   selfAccountId,
+  threadCardId,
   threadMessages,
   titleThread,
 } from '@/lib/chat/threads';
@@ -20,8 +21,6 @@ export const maxDuration = 60;
 const bodySchema = z.object({
   threadId: z.number().int(),
   message: z.string().min(1).max(4000),
-  /** Set when the thread was opened from a dashboard note. */
-  sourceCardId: z.number().int().optional(),
 });
 
 const CAPS = { dailyCalls: 200, reservedForCards: 40 };
@@ -37,7 +36,7 @@ const CAPS = { dailyCalls: 200, reservedForCards: 40 };
 export async function POST(request: Request): Promise<Response> {
   const parsed = bodySchema.safeParse(await request.json());
   if (!parsed.success) return Response.json({ error: 'bad request' }, { status: 400 });
-  const { threadId, message, sourceCardId } = parsed.data;
+  const { threadId, message } = parsed.data;
 
   const accountId = await selfAccountId();
   if (!accountId) {
@@ -47,9 +46,16 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
+  // Read off the thread row, not off the request. Which note a conversation
+  // came from is a property of the conversation, and the client has no business
+  // asserting it on every turn.
+  const sourceCardId = await threadCardId(threadId);
+
   await appendMessage({ threadId, role: 'user', content: message });
   const history = await threadMessages(threadId);
-  if (history.length === 1) await titleThread(threadId, message);
+  // Titles the thread from the first thing the user says, and only if it has no
+  // title — a thread opened from a note was already named after the note.
+  if (history.filter((m) => m.role === 'user').length === 1) await titleThread(threadId, message);
 
   const headroom = await checkHeadroom('chat', { callsToday }, CAPS);
   if (!headroom.allowed) {

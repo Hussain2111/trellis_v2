@@ -2,9 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   entryState,
   formatRiyadh,
+  monthLabel,
   riyadhDayKey,
   riyadhDayStart,
+  riyadhInstant,
+  riyadhMonthMatrix,
+  riyadhTimeOfDay,
   riyadhWeekStart,
+  shiftMonth,
 } from '../lib/time';
 
 describe('Riyadh boundaries', () => {
@@ -65,5 +70,56 @@ describe('entryState', () => {
     expect(entryState(new Date('2026-08-01T00:00:00Z'), { now, published: true })).toBe(
       'published',
     );
+  });
+});
+
+describe('the month grid', () => {
+  it('always returns six Monday-start weeks', () => {
+    for (const month of ['2026-02', '2026-08', '2027-01']) {
+      const weeks = riyadhMonthMatrix(month);
+      expect(weeks).toHaveLength(6);
+      expect(weeks.every((week) => week.length === 7)).toBe(true);
+    }
+  });
+
+  it('starts the grid on the Monday on or before the 1st', () => {
+    // 1 August 2026 is a Saturday, so the grid opens on Monday 27 July.
+    expect(riyadhMonthMatrix('2026-08')[0]?.[0]).toBe('2026-07-27');
+    expect(riyadhMonthMatrix('2026-08')[0]?.[5]).toBe('2026-08-01');
+  });
+
+  it('runs consecutively with no gaps or repeats', () => {
+    const days = riyadhMonthMatrix('2026-08').flat();
+    expect(new Set(days).size).toBe(42);
+    for (let i = 1; i < days.length; i++) {
+      const previous = new Date(`${days[i - 1]}T00:00:00Z`).getTime();
+      expect(new Date(`${days[i]}T00:00:00Z`).getTime() - previous).toBe(86_400_000);
+    }
+  });
+
+  it('steps months across a year boundary', () => {
+    expect(shiftMonth('2026-01', -1)).toBe('2025-12');
+    expect(shiftMonth('2026-12', 1)).toBe('2027-01');
+    expect(monthLabel('2026-08')).toBe('August 2026');
+  });
+});
+
+describe('Riyadh wall time to instant', () => {
+  // The boundary is the bug, not the offset. 01:00 Monday Riyadh is 22:00
+  // Sunday UTC, and this is the conversion that decides which week it files in.
+  it('stores a Riyadh wall time as the right instant', () => {
+    expect(riyadhInstant('2026-08-17', '01:00').toISOString()).toBe('2026-08-16T22:00:00.000Z');
+    expect(riyadhInstant('2026-08-17', '12:00').toISOString()).toBe('2026-08-17T09:00:00.000Z');
+  });
+
+  it('round-trips through the day key and the time of day', () => {
+    const instant = riyadhInstant('2026-08-17', '01:00');
+    expect(riyadhDayKey(instant)).toBe('2026-08-17');
+    expect(riyadhTimeOfDay(instant)).toBe('01:00');
+    expect(riyadhWeekStart(instant).toISOString()).toBe('2026-08-16T21:00:00.000Z');
+  });
+
+  it('defaults to midday, which cannot fall into the wrong day either way', () => {
+    expect(riyadhDayKey(riyadhInstant('2026-08-17'))).toBe('2026-08-17');
   });
 });

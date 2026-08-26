@@ -53,7 +53,7 @@ export default async function DashboardPage() {
                   id={card.id}
                   body={card.body}
                   index={i}
-                  citedPostIds={card.citedPostIds}
+                  citedPosts={card.citedPosts}
                 />
               ))}
             </div>
