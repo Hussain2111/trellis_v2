@@ -155,25 +155,73 @@ export function postIdsIn(payload: unknown): number[] {
 /**
  * Validate free-form text — the chat path.
  *
+ * The unit of removal is a LINE, not a sentence, and that is the whole design.
+ * An earlier version split on `.`, `!` and `?`, which destroyed anything
+ * structured: a markdown list numbered `1.`, `2.`, `3.` looks exactly like
+ * sentence punctuation, so a perfectly good answer listing twenty posts came
+ * back as "1.2.3.4.5.6." with the content stripped out between the numbers.
+ * Decimals fared no better — "3.5" split into "3." and "5".
+ *
+ * So: lines are preserved as lines. A list item is a unit. Within a line of
+ * prose, sentences are split only at a boundary followed by whitespace and a
+ * capital, which cannot occur inside a number, and a leading list marker is
+ * lifted off before splitting so it is never mistaken for the end of a
+ * sentence.
+ *
  * Sentence-level rather than message-level, because dropping a whole answer
- * over one bad figure loses correct information the user asked for. If every
- * sentence carrying substance is dropped, the caller is expected to say it
- * cannot back the answer rather than render the remains.
+ * over one bad figure loses correct information the user asked for. If
+ * everything with substance is dropped, the caller says it cannot back the
+ * answer rather than rendering the remains.
  */
+const LIST_MARKER = /^(\s*(?:[-*+]|\d+[.)])\s+)/;
+
+/** Split a line into sentences without mistaking list markers or decimals for boundaries. */
+export function splitSentences(line: string): string[] {
+  const marker = LIST_MARKER.exec(line)?.[1] ?? '';
+  const body = line.slice(marker.length);
+
+  // A real boundary is punctuation followed by whitespace and something that
+  // starts a sentence. "3.5" has no whitespace; "1. Item" had its marker
+  // removed above.
+  const parts = body.split(/(?<=[.!?])(?=\s+[A-Z"'“(])/g);
+  if (parts.length <= 1) return [line];
+  return parts.map((part, index) => (index === 0 ? marker + part : part));
+}
+
 export function stripUnbackedSentences(
   text: string,
   payload: unknown,
 ): { text: string; dropped: { sentence: string; figures: number[] }[] } {
   const allowed = allowedNumbers(payload);
-  const sentences = text.match(/[^.!?\n]+[.!?]?\n*/g) ?? [text];
-  const kept: string[] = [];
   const dropped: { sentence: string; figures: number[] }[] = [];
 
-  for (const sentence of sentences) {
-    const figures = unbackedNumbers(sentence, allowed);
-    if (figures.length > 0) dropped.push({ sentence: sentence.trim(), figures });
-    else kept.push(sentence);
-  }
+  const keptLines = text.split('\n').map((line): string | null => {
+    // Blank lines and lines with no figures at all pass through untouched, so
+    // paragraph breaks, headings and bullets keep their shape.
+    if (line.trim() === '') return line;
+    if (unbackedNumbers(line, allowed).length === 0) return line;
 
-  return { text: kept.join('').trim(), dropped };
+    const pieces = splitSentences(line);
+    const survivors: string[] = [];
+
+    for (const piece of pieces) {
+      const figures = unbackedNumbers(piece, allowed);
+      if (figures.length > 0) dropped.push({ sentence: piece.trim(), figures });
+      else survivors.push(piece);
+    }
+
+    // Every part of this line was unbacked. Remove the line outright rather
+    // than leaving a bare list marker pointing at nothing, or a blank gap in
+    // the middle of a list.
+    if (survivors.length === 0) return null;
+    return survivors.join('').trimEnd();
+  });
+
+  const out = keptLines
+    .filter((line): line is string => line !== null)
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  return { text: out, dropped };
 }
