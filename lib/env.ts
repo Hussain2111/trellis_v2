@@ -49,6 +49,15 @@ export const envSchema = z.object({
   MODEL_PRIMARY: z.string().default('google:gemini-3.6-flash'),
   MODEL_FALLBACK: z.string().optional(),
   GOOGLE_GENERATIVE_AI_API_KEY: z.string().optional(),
+  // Other lanes. Set the one whose provider appears in MODEL_PRIMARY or
+  // MODEL_FALLBACK; the rest stay unset and cost nothing. All speak the OpenAI
+  // wire format, so they share one adapter — see lib/model/provider.ts.
+  GROQ_API_KEY: z.string().optional(),
+  DEEPSEEK_API_KEY: z.string().optional(),
+  OPENROUTER_API_KEY: z.string().optional(),
+  TOGETHER_API_KEY: z.string().optional(),
+  CEREBRAS_API_KEY: z.string().optional(),
+  MISTRAL_API_KEY: z.string().optional(),
   /**
    * Provider requests allowed per minute. Configuration, not a constant,
    * because it is a property of the plan rather than of the code — and it is

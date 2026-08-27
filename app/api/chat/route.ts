@@ -7,9 +7,7 @@ import { chatTools } from '@/lib/chat/tools';
 import {
   appendMessage,
   buildSystemPrompt,
-  callsLastMinute,
-  callsToday,
-  oldestCallInWindow,
+  ledgerFor,
   selfAccountId,
   findThread,
   threadMessages,
@@ -20,7 +18,7 @@ import {
   checkHeadroom,
   maxStepsFor,
   quotaCaps,
-  resolveModel,
+  resolveLanes,
 } from '@/lib/model/provider';
 import { stripUnbackedSentences } from '@/lib/validate/numbers';
 
@@ -74,32 +72,10 @@ export async function POST(request: Request): Promise<Response> {
     if (history.filter((m) => m.role === 'user').length === 1) await titleThread(threadId, message);
 
     const caps = quotaCaps();
-    const headroom = await checkHeadroom(
-      'chat',
-      { callsToday, callsLastMinute, oldestCallInWindow },
-      caps,
-    );
-    if (!headroom.allowed) {
-      return Response.json(
-        {
-          error: 'quota',
-          message: headroom.retryAfterSeconds
-            ? `${headroom.reason} ${waitPhrase(headroom.retryAfterSeconds)}`
-            : headroom.reason,
-          retryAfterSeconds: headroom.retryAfterSeconds,
-        },
-        {
-          status: 429,
-          ...(headroom.retryAfterSeconds
-            ? { headers: { 'retry-after': String(headroom.retryAfterSeconds) } }
-            : {}),
-        },
-      );
-    }
 
-    let model;
+    let lanes;
     try {
-      model = resolveModel();
+      lanes = resolveLanes();
     } catch (error) {
       return Response.json(
         {
@@ -110,125 +86,172 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    const started = Date.now();
+    const system =
+      (await buildSystemPrompt(accountId)) +
+      (sourceCardId
+        ? [
+            '',
+            '',
+            // The id is an instruction to the tool, never a name for the note.
+            // Naming it in this sentence is what produced answers opening
+            // "Dashboard note 1 (generated today) highlights…" — a preamble
+            // about where the conversation started, in front of the answer
+            // that was actually asked for.
+            `This conversation was opened from a note on the dashboard. Call getInsightCard with cardId ${sourceCardId} before answering, so its figures come back as data you may restate.`,
+            'Do NOT open with a preamble about the note, its number, or when it was generated. Answer the question that was asked. Mention the note only where it bears on the answer, and then as "the note you opened" — it has no number the reader can see.',
+          ].join('\n')
+        : '');
+
     const tools = chatTools(accountId);
+    const messages = history.map((m) => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content,
+    }));
 
-    try {
-      const result = await generateText({
-        model: model.model,
-        system:
-          (await buildSystemPrompt(accountId)) +
-          (sourceCardId
-            ? [
-                '',
-                '',
-                // The id is an instruction to the tool, never a name for the note.
-                // Naming it in this sentence is what produced answers opening
-                // "Dashboard note 1 (generated today) highlights…" — a preamble
-                // about where the conversation started, in front of the answer
-                // that was actually asked for.
-                `This conversation was opened from a note on the dashboard. Call getInsightCard with cardId ${sourceCardId} before answering, so its figures come back as data you may restate.`,
-                'Do NOT open with a preamble about the note, its number, or when it was generated. Answer the question that was asked. Mention the note only where it bears on the answer, and then as "the note you opened" — it has no number the reader can see.',
-              ].join('\n')
-            : ''),
-        messages: history.map((m) => ({
-          role: m.role as 'user' | 'assistant',
-          content: m.content,
-        })),
-        tools,
-        // Every step is another provider request, so the ceiling is derived from
-        // the per-minute limit rather than picked. A fixed 8 blew a 5-a-minute
-        // budget from inside a single call, where no pre-flight check can reach.
-        stopWhen: stepCountIs(maxStepsFor(caps)),
-        // The SDK's default is three attempts. On a quota error that spends three
-        // of the five requests a minute allows, on a call that could not have
-        // succeeded — so retrying is handled here, by not doing it.
-        maxRetries: 0,
-        temperature: 0.4,
-      });
+    /**
+     * Walk the lanes. A lane out of requests is a reason to try the next one,
+     * not a reason to fail the question — which is the entire point of
+     * configuring MODEL_FALLBACK, and was not what it did before: the fallback
+     * was reached only when the primary could not be BUILT.
+     *
+     * Every limit belongs to a provider, so the ledger is scoped to one too. A
+     * fresh provider starts with a fresh allowance rather than inheriting the
+     * exhausted one's counter.
+     */
+    let lastRefusal: { message: string; retryAfterSeconds?: number } | null = null;
 
-      // Everything the tools actually returned this turn. This — and only this —
-      // is what the model's numbers are allowed to be drawn from.
-      const evidence = result.steps.flatMap((step) =>
-        step.toolResults.map((r) => (r as { output?: unknown }).output),
-      );
-
-      const { text, dropped } = stripUnbackedSentences(result.text, evidence);
-
-      const answer =
-        text.trim().length > 0
-          ? text
-          : "I can't back that up from your data — every figure I was about to give you came from somewhere other than a query, so I've dropped it rather than show you a number I can't stand behind.";
-
-      await appendMessage({
-        threadId,
-        role: 'assistant',
-        content: answer,
-        toolCalls: result.steps.flatMap((s) => s.toolCalls.map((c) => c.toolName)),
-        validation: dropped.length > 0 ? { dropped } : null,
-      });
-
-      await db()
-        .insert(modelRuns)
-        .values({
-          accountId,
-          purpose: 'chat',
-          provider: model.provider,
-          model: model.modelId,
-          promptTokens: result.usage?.inputTokens ?? null,
-          completionTokens: result.usage?.outputTokens ?? null,
-          status: 'ok',
-          calls: result.steps.length,
-          durationMs: Date.now() - started,
-        });
-
-      return Response.json({
-        answer,
-        // Surfaced rather than hidden: if the validator had to remove something,
-        // that is worth knowing about the model, not just about the answer.
-        dropped: dropped.length,
-        toolsUsed: result.steps.flatMap((s) => s.toolCalls.map((c) => c.toolName)),
-      });
-    } catch (error) {
-      const quota = asQuotaError(error);
-
-      await db()
-        .insert(modelRuns)
-        .values({
-          accountId,
-          purpose: 'chat',
-          provider: model.provider,
-          model: model.modelId,
-          status: 'error',
-          error: error instanceof Error ? error.message : String(error),
-          // A rejected call still reached the provider and still counted against
-          // the limit. Recording it as zero would let the ledger drift below what
-          // the provider is actually counting, which is how the guard gets
-          // quietly overrun.
-          calls: 1,
-          durationMs: Date.now() - started,
-        });
-
-      // A quota error is not a failure of this app and clears by waiting. Saying
-      // so — with the provider's own number for how long — is a different message
-      // from "something went wrong", and the difference matters to whoever is
-      // sitting in front of it.
-      if (quota) {
-        return Response.json(
-          {
-            error: 'quota',
-            message: `The model is over its request limit for the moment. ${waitPhrase(quota.retryAfterSeconds)}`,
-            retryAfterSeconds: quota.retryAfterSeconds,
-          },
-          { status: 429, headers: { 'retry-after': String(quota.retryAfterSeconds) } },
-        );
+    for (const model of lanes) {
+      const headroom = await checkHeadroom('chat', ledgerFor(model.provider), caps);
+      if (!headroom.allowed) {
+        lastRefusal = {
+          message: headroom.retryAfterSeconds
+            ? `${headroom.reason} ${waitPhrase(headroom.retryAfterSeconds)}`
+            : (headroom.reason ?? 'No allowance left.'),
+          retryAfterSeconds: headroom.retryAfterSeconds,
+        };
+        continue;
       }
 
-      return Response.json(
-        { error: 'failed', message: error instanceof Error ? error.message : String(error) },
-        { status: 500 },
-      );
+      const started = Date.now();
+      try {
+        const result = await generateText({
+          model: model.model,
+          system,
+          messages,
+          tools,
+          // Every step is another provider request, so the ceiling is derived
+          // from the per-minute limit rather than picked. A fixed 8 blew a
+          // 5-a-minute budget from inside a single call, where no pre-flight
+          // check can reach.
+          stopWhen: stepCountIs(maxStepsFor(caps)),
+          // The SDK's default is three attempts. On a quota error that spends
+          // three of the five requests a minute allows, on a call that could not
+          // have succeeded — so retrying is handled here, by not doing it.
+          maxRetries: 0,
+          temperature: 0.4,
+        });
+
+        // Everything the tools actually returned this turn. This — and only
+        // this — is what the model's numbers are allowed to be drawn from.
+        const evidence = result.steps.flatMap((step) =>
+          step.toolResults.map((r) => (r as { output?: unknown }).output),
+        );
+
+        const { text, dropped } = stripUnbackedSentences(result.text, evidence);
+
+        const answer =
+          text.trim().length > 0
+            ? text
+            : "I can't back that up from your data — every figure I was about to give you came from somewhere other than a query, so I've dropped it rather than show you a number I can't stand behind.";
+
+        await appendMessage({
+          threadId,
+          role: 'assistant',
+          content: answer,
+          toolCalls: result.steps.flatMap((step) => step.toolCalls.map((c) => c.toolName)),
+          validation: dropped.length > 0 ? { dropped } : null,
+        });
+
+        await db()
+          .insert(modelRuns)
+          .values({
+            accountId,
+            purpose: 'chat',
+            provider: model.provider,
+            model: model.modelId,
+            promptTokens: result.usage?.inputTokens ?? null,
+            completionTokens: result.usage?.outputTokens ?? null,
+            status: 'ok',
+            calls: result.steps.length,
+            durationMs: Date.now() - started,
+          });
+
+        return Response.json({
+          answer,
+          // Surfaced rather than hidden: if the validator had to remove
+          // something, that is worth knowing about the model, not just about
+          // the answer.
+          dropped: dropped.length,
+          toolsUsed: result.steps.flatMap((step) => step.toolCalls.map((c) => c.toolName)),
+          // Which lane answered. A fallback answering is not a failure, but it
+          // is worth being able to see rather than having to infer.
+          via: model.isFallback ? `${model.provider}:${model.modelId}` : undefined,
+        });
+      } catch (error) {
+        const quota = asQuotaError(error);
+
+        await db()
+          .insert(modelRuns)
+          .values({
+            accountId,
+            purpose: 'chat',
+            provider: model.provider,
+            model: model.modelId,
+            status: 'error',
+            error: error instanceof Error ? error.message : String(error),
+            // A rejected call still reached the provider and still counted
+            // against the limit there. Recording it as zero would let the
+            // ledger drift below what is actually being enforced, which is how
+            // a guard gets quietly overrun.
+            calls: 1,
+            durationMs: Date.now() - started,
+          });
+
+        if (quota) {
+          lastRefusal = {
+            message: `${model.provider} is over its request limit. ${waitPhrase(quota.retryAfterSeconds)}`,
+            retryAfterSeconds: quota.retryAfterSeconds,
+          };
+          continue;
+        }
+
+        return Response.json(
+          { error: 'failed', message: error instanceof Error ? error.message : String(error) },
+          { status: 500 },
+        );
+      }
     }
+
+    // Every lane refused. A quota refusal is not a failure of this app and
+    // clears by waiting, so it says so, and says when.
+    return Response.json(
+      {
+        error: 'quota',
+        message:
+          lastRefusal?.message ??
+          'No model is available at the moment.' +
+            (lanes.length === 1
+              ? ' Setting MODEL_FALLBACK to a different provider would let this fall through instead of stopping.'
+              : ''),
+        retryAfterSeconds: lastRefusal?.retryAfterSeconds,
+      },
+      {
+        status: 429,
+        ...(lastRefusal?.retryAfterSeconds
+          ? { headers: { 'retry-after': String(lastRefusal.retryAfterSeconds) } }
+          : {}),
+      },
+    );
   });
 }
 

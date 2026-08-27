@@ -1,4 +1,5 @@
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { LanguageModel } from 'ai';
 import { env } from '../env';
 
@@ -29,17 +30,87 @@ export function parseModelRef(value: string): ModelRef {
 }
 
 /**
- * Adding a second lane is a registry entry plus its SDK package. Groq, Mistral
- * and OpenRouter are the usual ones; none is installed until it is needed,
- * because an uninstalled fallback is honest and a broken import is not.
+ * Every lane, from one adapter.
+ *
+ * Groq, DeepSeek, OpenRouter, Together, Cerebras and Mistral all speak the
+ * OpenAI wire format, so they are a base URL and a key rather than six SDK
+ * packages. Google is the exception and keeps its own adapter, because its API
+ * is not OpenAI-shaped.
+ *
+ * The point of this table is that changing provider is an environment change.
+ * `MODEL_PRIMARY=groq:llama-3.3-70b-versatile` plus `GROQ_API_KEY` is the whole
+ * migration — no code, no deploy of new code, and the quota guards, the ledger
+ * and the validator all carry over untouched because none of them know or care
+ * which lane produced the text.
+ *
+ * NO LIMITS ARE RECORDED HERE. Every provider publishes its own, they change,
+ * and a number written down in code is a number nobody re-reads. Read them from
+ * the provider's console and put them in MODEL_CALLS_PER_MINUTE and
+ * MODEL_CALLS_PER_DAY, the same discipline docs/quota.md applies to Gemini.
  */
+interface Lane {
+  baseURL: string;
+  /** The environment variable holding this provider's key. */
+  keyName: string;
+  label: string;
+}
+
+const OPENAI_COMPATIBLE: Record<string, Lane> = {
+  groq: {
+    baseURL: 'https://api.groq.com/openai/v1',
+    keyName: 'GROQ_API_KEY',
+    label: 'Groq',
+  },
+  deepseek: {
+    baseURL: 'https://api.deepseek.com/v1',
+    keyName: 'DEEPSEEK_API_KEY',
+    label: 'DeepSeek',
+  },
+  openrouter: {
+    baseURL: 'https://openrouter.ai/api/v1',
+    keyName: 'OPENROUTER_API_KEY',
+    label: 'OpenRouter',
+  },
+  together: {
+    baseURL: 'https://api.together.xyz/v1',
+    keyName: 'TOGETHER_API_KEY',
+    label: 'Together',
+  },
+  cerebras: {
+    baseURL: 'https://api.cerebras.ai/v1',
+    keyName: 'CEREBRAS_API_KEY',
+    label: 'Cerebras',
+  },
+  mistral: {
+    baseURL: 'https://api.mistral.ai/v1',
+    keyName: 'MISTRAL_API_KEY',
+    label: 'Mistral',
+  },
+};
+
 const PROVIDERS: Record<string, (ref: ModelRef) => LanguageModel> = {
   google: (ref) => {
     const key = env().GOOGLE_GENERATIVE_AI_API_KEY;
     if (!key) throw new ModelUnavailable('google', 'GOOGLE_GENERATIVE_AI_API_KEY is not set');
     return createGoogleGenerativeAI({ apiKey: key })(ref.modelId);
   },
+
+  ...Object.fromEntries(
+    Object.entries(OPENAI_COMPATIBLE).map(([name, lane]) => [
+      name,
+      (ref: ModelRef) => {
+        const key = process.env[lane.keyName];
+        if (!key) throw new ModelUnavailable(name, `${lane.keyName} is not set`);
+        return createOpenAICompatible({ name, baseURL: lane.baseURL, apiKey: key })(ref.modelId);
+      },
+    ]),
+  ),
 };
+
+/** Providers this build can reach, for the settings page and for error text. */
+export function knownProviders(): string[] {
+  return Object.keys(PROVIDERS);
+}
 
 export class ModelUnavailable extends Error {
   readonly provider: string;
@@ -59,27 +130,70 @@ export interface ResolvedModel {
 }
 
 /**
- * Resolve the model for a purpose, falling back if the primary cannot be
- * built. Failure to resolve is loud — there is no silent degrade to a
- * different capability tier, because a quietly worse model produces quietly
- * worse answers and nothing says so.
+ * Resolve the model, falling back if the primary cannot be BUILT — a missing
+ * key, an unregistered provider. Failure to resolve is loud: there is no silent
+ * degrade to a different capability tier, because a quietly worse model
+ * produces quietly worse answers and nothing says so.
  */
 export function resolveModel(): ResolvedModel {
+  const lanes = resolveLanes();
+  const first = lanes[0];
+  if (!first) throw new ModelUnavailable('none', 'no model could be resolved');
+  return first;
+}
+
+/**
+ * Every lane that can be built, primary first.
+ *
+ * `MODEL_FALLBACK` used to be reached only when the primary could not be
+ * constructed — a missing API key. That is the rarest way a model becomes
+ * unavailable and the least interesting: the common one is the primary being
+ * over its rate limit, which is a property of the call, not of the
+ * configuration, and which the old code could not see. A caller walks this list
+ * so that a lane refusing on quota moves to the next one instead of failing the
+ * request.
+ *
+ * A fallback on the SAME provider is not a fallback. If Gemini is out of
+ * requests for the day, a second Gemini model is out of requests too — the
+ * limit is per project, not per model. Same-provider lanes are dropped here
+ * rather than being discovered as a second identical refusal.
+ */
+export function resolveLanes(): ResolvedModel[] {
+  const lanes: ResolvedModel[] = [];
   const primary = parseModelRef(env().MODEL_PRIMARY);
+
+  let primaryError: unknown = null;
   try {
-    return { model: build(primary), ...primary, isFallback: false };
-  } catch (primaryError) {
-    const fallbackRef = env().MODEL_FALLBACK;
-    if (!fallbackRef) throw primaryError;
-    const fallback = parseModelRef(fallbackRef);
-    return { model: build(fallback), ...fallback, isFallback: true };
+    lanes.push({ model: build(primary), ...primary, isFallback: false });
+  } catch (error) {
+    primaryError = error;
   }
+
+  const configured = env().MODEL_FALLBACK;
+  if (configured) {
+    const fallback = parseModelRef(configured);
+    const sameProvider = lanes[0]?.provider === fallback.provider;
+    if (!sameProvider) {
+      try {
+        lanes.push({ model: build(fallback), ...fallback, isFallback: true });
+      } catch {
+        // A fallback that cannot be built is not an error while the primary
+        // works. It becomes one only if there is nothing left, below.
+      }
+    }
+  }
+
+  if (lanes.length === 0) throw primaryError ?? new ModelUnavailable('none', 'no lane available');
+  return lanes;
 }
 
 function build(ref: ModelRef): LanguageModel {
   const factory = PROVIDERS[ref.provider];
   if (!factory) {
-    throw new ModelUnavailable(ref.provider, 'no adapter registered for this provider');
+    throw new ModelUnavailable(
+      ref.provider,
+      `no adapter for this provider. Known: ${knownProviders().join(', ')}`,
+    );
   }
   return factory(ref);
 }

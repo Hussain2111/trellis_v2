@@ -158,10 +158,15 @@ export async function buildSystemPrompt(accountId: number): Promise<string> {
  * of several provider requests; every published rate limit counts requests. A
  * row that predates the `calls` column stands for at least one.
  */
-export async function callsToday(purpose: 'chat' | 'cards'): Promise<number> {
+export async function callsToday(purpose: 'chat' | 'cards', provider?: string): Promise<number> {
+  // Scoped to a provider, because a limit belongs to a provider. Switching from
+  // an exhausted Gemini key to Groq must not inherit Gemini's spent counter —
+  // the whole point of switching is a fresh allowance.
   const [row] = (await db().execute(sql`
     select coalesce(sum(coalesce(calls, 1)), 0)::int as n from model_runs
-    where purpose = ${purpose} and created_at > now() - interval '24 hours'
+    where purpose = ${purpose}
+      and created_at > now() - interval '24 hours'
+      ${provider ? sql`and provider = ${provider}` : sql``}
   `)) as unknown as { n: number }[];
   return row?.n ?? 0;
 }
@@ -173,10 +178,11 @@ export async function callsToday(purpose: 'chat' | 'cards'): Promise<number> {
  * again. A true statement about this app's own guard, which is not the same as
  * guessing when the provider resets its counter.
  */
-export async function oldestCallInWindow(): Promise<Date | null> {
+export async function oldestCallInWindow(provider?: string): Promise<Date | null> {
   const [row] = (await db().execute(sql`
     select min(created_at) as oldest from model_runs
     where created_at > now() - interval '24 hours'
+      ${provider ? sql`and provider = ${provider}` : sql``}
   `)) as unknown as { oldest: string | Date | null }[];
   if (!row?.oldest) return null;
   // The driver hands back a raw string for an aggregate over a timestamp, and
@@ -192,10 +198,20 @@ export async function oldestCallInWindow(): Promise<Date | null> {
  * minute, where the daily cap is two hundred. A guard that only knows about the
  * day never sees it coming.
  */
-export async function callsLastMinute(): Promise<number> {
+export async function callsLastMinute(provider?: string): Promise<number> {
   const [row] = (await db().execute(sql`
     select coalesce(sum(coalesce(calls, 1)), 0)::int as n from model_runs
     where created_at > now() - interval '60 seconds'
+      ${provider ? sql`and provider = ${provider}` : sql``}
   `)) as unknown as { n: number }[];
   return row?.n ?? 0;
+}
+
+/** A ledger scoped to one provider, which is the scope every rate limit has. */
+export function ledgerFor(provider: string) {
+  return {
+    callsToday: (purpose: 'chat' | 'cards') => callsToday(purpose, provider),
+    callsLastMinute: () => callsLastMinute(provider),
+    oldestCallInWindow: () => oldestCallInWindow(provider),
+  };
 }

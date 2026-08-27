@@ -79,8 +79,18 @@ minute, 20 a day.** A question is a tool loop costing up to four requests, so a
 day is **about four questions**. `/settings` shows how many are left rather than
 a request count, because that is the unit you think in.
 
-Both limits are environment variables, so a paid tier is a config change. See
-`docs/quota.md` for the arithmetic and for why raising the per-minute value
+Both limits are environment variables, so a paid tier is a config change — and
+so is a different provider. `google`, `groq`, `deepseek`, `openrouter`,
+`together`, `cerebras` and `mistral` are registered; all but Google share one
+adapter because they speak the same wire format. Set `MODEL_PRIMARY`, the
+matching key, and the two limits from that provider's console.
+
+`MODEL_FALLBACK` is used when the primary is **out of requests**, not only when
+its key is missing, so a second provider there is what stops a spent daily limit
+from stopping the app. It has to be a different provider: a limit belongs to a
+project, not a model.
+
+See `docs/quota.md` for the arithmetic and for why raising the per-minute value
 costs you questions.
 
 ## The rules everything follows

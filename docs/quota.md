@@ -91,6 +91,39 @@ a few hundred rows it is nowhere near binding, and a guard nobody needs is a
 guard nobody maintains. If the payloads grow, revisit — from the outside the
 failure would look identical to the RPM one.
 
+## Changing provider
+
+Every lane except Google speaks the OpenAI wire format, so they share one
+adapter. Switching is an environment change:
+
+```
+MODEL_PRIMARY=groq:llama-3.3-70b-versatile
+GROQ_API_KEY=...
+MODEL_CALLS_PER_MINUTE=<read it from Groq's console>
+MODEL_CALLS_PER_DAY=<read it from Groq's console>
+```
+
+Registered: `google`, `groq`, `deepseek`, `openrouter`, `together`, `cerebras`,
+`mistral`. `/settings` lists which lanes actually **built** — the difference
+between configured and built is a missing API key, and finding that out when the
+primary runs dry is finding out too late.
+
+**No limits for these are written down here, deliberately.** Every provider
+publishes its own, they change, and a number in a file nobody re-reads is how
+the 200-a-day default came to exist while the real limit was 20. Read them from
+the console you are actually billed against.
+
+**`MODEL_FALLBACK` now catches a spent limit**, not just a missing key. That was
+the gap: the fallback was reached only when the primary could not be _built_,
+which is the rarest way a model becomes unavailable. A quota refusal now moves
+to the next lane and answers the question.
+
+It must be a **different provider**. A limit belongs to a project, not to a
+model, so a second Gemini model is out of requests for exactly the same reason
+the first one is — same-provider fallbacks are dropped rather than tried and
+refused twice. The ledger is scoped per provider too, so a fresh provider starts
+with a fresh allowance instead of inheriting the exhausted one's counter.
+
 ## Changing tier
 
 `MODEL_CALLS_PER_MINUTE` and `MODEL_CALLS_PER_DAY` are environment variables, so

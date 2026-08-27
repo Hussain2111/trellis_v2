@@ -3,8 +3,8 @@ import { z } from 'zod';
 import { desc, eq } from 'drizzle-orm';
 import { db } from '../db/client';
 import { insightBatches, insightCards } from '../db/schema';
-import { asQuotaError, checkHeadroom, quotaCaps, resolveModel } from '../model/provider';
-import { callsLastMinute, callsToday, oldestCallInWindow } from '../chat/threads';
+import { asQuotaError, checkHeadroom, quotaCaps, resolveLanes } from '../model/provider';
+import { ledgerFor } from '../chat/threads';
 import { modelRuns } from '../db/schema';
 import { validateClaims } from '../validate/numbers';
 import { buildCardPayload } from './payload';
@@ -96,11 +96,23 @@ export async function generateInsightCards(accountId: number): Promise<GenerateR
   // and a refresh could spend the per-minute allowance out from under the chat
   // with nothing to show for it afterwards.
   const caps = quotaCaps();
-  const headroom = await checkHeadroom(
-    'cards',
-    { callsToday, callsLastMinute, oldestCallInWindow },
-    caps,
-  );
+  // The first lane that has allowance. Card generation is one request, so it
+  // does not need the chat's loop — but it does need the same right to move to
+  // a different provider rather than skipping a day's notes.
+  const lanes = resolveLanes();
+  const withRoom: {
+    model: (typeof lanes)[number];
+    headroom: Awaited<ReturnType<typeof checkHeadroom>>;
+  }[] = [];
+  for (const lane of lanes) {
+    withRoom.push({
+      model: lane,
+      headroom: await checkHeadroom('cards', ledgerFor(lane.provider), caps),
+    });
+  }
+  const chosen = withRoom.find((lane) => lane.headroom.allowed);
+  const headroom = chosen?.headroom ??
+    withRoom[0]?.headroom ?? { allowed: false, used: 0, limit: 0 };
   if (!headroom.allowed) {
     const [batch] = await db()
       .insert(insightBatches)
@@ -121,7 +133,7 @@ export async function generateInsightCards(accountId: number): Promise<GenerateR
     };
   }
 
-  const model = resolveModel();
+  const model = chosen!.model;
   const started = Date.now();
 
   let generated: z.infer<typeof cardSchema>;

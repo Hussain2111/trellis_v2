@@ -1,7 +1,14 @@
 import { sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { env } from '@/lib/env';
-import { maxStepsFor, questionsLeft, quotaCaps } from '@/lib/model/provider';
+import {
+  knownProviders,
+  maxStepsFor,
+  parseModelRef,
+  questionsLeft,
+  quotaCaps,
+  resolveLanes,
+} from '@/lib/model/provider';
 import { callsLastMinute, callsToday } from '@/lib/chat/threads';
 import { ALL_SCOPES, REQUIRED_SCOPES, SCOPE_PURPOSE } from '@/lib/graph/scopes';
 import { formatRiyadh } from '@/lib/time';
@@ -53,10 +60,13 @@ async function modelUsage(): Promise<
   { ok: true; lastMinute: number; chat: number; cards: number } | { ok: false; error: string }
 > {
   try {
+    // Scoped to the lane actually in use. A rate limit belongs to a provider,
+    // so a count that mixes two of them describes neither.
+    const provider = parseModelRef(env().MODEL_PRIMARY).provider;
     const [lastMinute, chat, cards] = await Promise.all([
-      callsLastMinute(),
-      callsToday('chat'),
-      callsToday('cards'),
+      callsLastMinute(provider),
+      callsToday('chat', provider),
+      callsToday('cards', provider),
     ]);
     return { ok: true, lastMinute, chat, cards };
   } catch (error) {
@@ -78,6 +88,14 @@ export default async function SettingsPage() {
   // a confident "0 of 5" on the one page whose entire job is to report what the
   // running function actually resolved.
   const [database, usage] = await Promise.all([databaseStatus(), modelUsage()]);
+  // Built, not merely configured — the difference is a missing API key.
+  const lanes = (() => {
+    try {
+      return resolveLanes();
+    } catch {
+      return [];
+    }
+  })();
 
   const rows: { label: string; value: string; tone?: 'good' | 'bad' }[] = [
     { label: 'Graph API version requested', value: e.GRAPH_API_VERSION },
@@ -126,6 +144,19 @@ export default async function SettingsPage() {
     {
       label: 'Requests a question can spend',
       value: `up to ${maxStepsFor(caps)}`,
+    },
+    {
+      // A fallback that cannot be built is not a fallback, and finding that out
+      // when the primary runs dry is finding out too late.
+      label: 'Lanes available',
+      value: lanes.length
+        ? lanes.map((lane) => `${lane.provider}:${lane.modelId}`).join(' → ')
+        : 'none',
+      tone: lanes.length > 1 ? 'good' : undefined,
+    },
+    {
+      label: 'Providers this build can reach',
+      value: knownProviders().join(', '),
     },
   ];
 

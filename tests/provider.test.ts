@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   asQuotaError,
   checkHeadroom,
+  knownProviders,
   maxStepsFor,
   parseModelRef,
   questionsLeft,
+  resolveLanes,
   type QuotaLedger,
 } from '../lib/model/provider';
+import { __setEnvForTests } from '../lib/env';
 
 describe('parseModelRef', () => {
   it('splits provider from model', () => {
@@ -188,5 +191,89 @@ describe('the daily limit, at its real size', () => {
     );
     expect(headroom.allowed).toBe(false);
     expect(headroom.retryAfterSeconds).toBeUndefined();
+  });
+});
+
+/**
+ * Switching provider has to be an environment change, or it will not happen
+ * when it needs to — which is at the moment the current one stops answering.
+ */
+describe('lanes', () => {
+  const withEnv = <T>(vars: Record<string, string>, run: () => T): T => {
+    const saved = { ...process.env };
+    Object.assign(process.env, vars);
+    __setEnvForTests(null);
+    try {
+      return run();
+    } finally {
+      for (const key of Object.keys(vars)) delete process.env[key];
+      Object.assign(process.env, saved);
+      __setEnvForTests(null);
+    }
+  };
+
+  it('reaches more than one provider without a code change', () => {
+    expect(knownProviders()).toEqual(
+      expect.arrayContaining(['google', 'groq', 'deepseek', 'openrouter']),
+    );
+  });
+
+  it('builds a lane from an OpenAI-compatible provider and its key', () => {
+    withEnv({ MODEL_PRIMARY: 'groq:llama-3.3-70b-versatile', GROQ_API_KEY: 'k' }, () => {
+      const [lane] = resolveLanes();
+      expect(lane?.provider).toBe('groq');
+      expect(lane?.modelId).toBe('llama-3.3-70b-versatile');
+      expect(lane?.isFallback).toBe(false);
+    });
+  });
+
+  it('offers the fallback as a second lane, not only when the first is unbuildable', () => {
+    withEnv(
+      {
+        MODEL_PRIMARY: 'google:gemini-3.6-flash',
+        GOOGLE_GENERATIVE_AI_API_KEY: 'k',
+        MODEL_FALLBACK: 'groq:llama-3.3-70b-versatile',
+        GROQ_API_KEY: 'k',
+      },
+      () => {
+        const lanes = resolveLanes();
+        expect(lanes.map((lane) => lane.provider)).toEqual(['google', 'groq']);
+        expect(lanes[1]?.isFallback).toBe(true);
+      },
+    );
+  });
+
+  it('drops a same-provider fallback, which shares the exhausted limit', () => {
+    // A rate limit is per project, not per model. A second Gemini model is out
+    // of requests for exactly the same reason the first one is.
+    withEnv(
+      {
+        MODEL_PRIMARY: 'google:gemini-3.6-flash',
+        MODEL_FALLBACK: 'google:gemini-3.6-pro',
+        GOOGLE_GENERATIVE_AI_API_KEY: 'k',
+      },
+      () => {
+        expect(resolveLanes()).toHaveLength(1);
+      },
+    );
+  });
+
+  it('still serves the primary when the fallback has no key', () => {
+    withEnv(
+      {
+        MODEL_PRIMARY: 'google:gemini-3.6-flash',
+        GOOGLE_GENERATIVE_AI_API_KEY: 'k',
+        MODEL_FALLBACK: 'groq:llama-3.3-70b-versatile',
+      },
+      () => {
+        expect(resolveLanes().map((lane) => lane.provider)).toEqual(['google']);
+      },
+    );
+  });
+
+  it('names what it knows when asked for a provider it does not', () => {
+    withEnv({ MODEL_PRIMARY: 'anthropic:claude' }, () => {
+      expect(() => resolveLanes()).toThrow(/Known: /);
+    });
   });
 });
