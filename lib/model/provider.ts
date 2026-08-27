@@ -98,19 +98,28 @@ function build(ref: ModelRef): LanguageModel {
  * that runs while nobody is watching.
  */
 export interface QuotaCaps {
-  /** Total model CALLS per day across all purposes. Read from the provider
-   *  console, never copied from a blog — free-tier limits changed
-   *  substantially in late 2025 and are no longer published as a static
-   *  table. Recorded in docs/quota.md with the date observed. */
+  /** Total provider CALLS per day across all purposes. */
   dailyCalls: number;
   /** Calls held back for scheduled generation, unavailable to chat. */
   reservedForCards: number;
+  /**
+   * Calls per MINUTE, across everything.
+   *
+   * This is the limit that actually fires on a free tier, and the daily cap
+   * never sees it coming. The observed value for `gemini-3.6-flash` free tier
+   * is five — small enough that one question with a three-step tool loop can
+   * spend most of a minute's allowance by itself. Recorded in docs/quota.md
+   * with the date it was observed.
+   */
+  callsPerMinute: number;
 }
 
 export interface QuotaLedger {
   /** Calls already spent today for a purpose. Failures count — a failed call
    *  spent the same quota as a successful one. */
   callsToday(purpose: Purpose): Promise<number>;
+  /** Calls spent in the last 60 seconds, across every purpose. */
+  callsLastMinute(): Promise<number>;
 }
 
 export interface Headroom {
@@ -118,6 +127,22 @@ export interface Headroom {
   used: number;
   limit: number;
   reason?: string;
+  /** Seconds until this is worth trying again. Only set for the per-minute limit. */
+  retryAfterSeconds?: number;
+}
+
+/**
+ * How many steps one message may take.
+ *
+ * A tool loop is not one request — every step is another one. So the ceiling on
+ * steps has to sit under the per-minute limit, or a single `generateText` blows
+ * the budget from the inside where no pre-flight check can see it. One call is
+ * held back so that asking a second question does not have to wait a full
+ * minute, and the whole thing is capped at 8 because past that a loop is stuck
+ * rather than working.
+ */
+export function maxStepsFor(caps: QuotaCaps): number {
+  return Math.max(2, Math.min(8, caps.callsPerMinute - 1));
 }
 
 export async function checkHeadroom(
@@ -125,7 +150,26 @@ export async function checkHeadroom(
   ledger: QuotaLedger,
   caps: QuotaCaps,
 ): Promise<Headroom> {
-  const [chat, cards] = await Promise.all([ledger.callsToday('chat'), ledger.callsToday('cards')]);
+  const [chat, cards, lastMinute] = await Promise.all([
+    ledger.callsToday('chat'),
+    ledger.callsToday('cards'),
+    ledger.callsLastMinute(),
+  ]);
+
+  // The per-minute limit is checked first because it is the one that fires, and
+  // because it clears on its own — telling someone to wait forty seconds is a
+  // different message from telling them they are done for the day.
+  const steps = maxStepsFor(caps);
+  if (lastMinute + steps > caps.callsPerMinute) {
+    return {
+      allowed: false,
+      used: lastMinute,
+      limit: caps.callsPerMinute,
+      reason: `That would go over ${caps.callsPerMinute} requests a minute, which is what this plan allows.`,
+      retryAfterSeconds: 60,
+    };
+  }
+
   const used = purpose === 'chat' ? chat : cards;
 
   if (purpose === 'cards') {
@@ -148,4 +192,49 @@ export async function checkHeadroom(
         limit: availableToChat,
         reason: 'chat allowance is spent for today; the rest is reserved for insight cards',
       };
+}
+
+/** Caps as configured. Read from the environment so the plan can change without a deploy. */
+export function quotaCaps(): QuotaCaps {
+  return {
+    dailyCalls: env().MODEL_CALLS_PER_DAY,
+    reservedForCards: Math.min(40, Math.floor(env().MODEL_CALLS_PER_DAY / 5)),
+    callsPerMinute: env().MODEL_CALLS_PER_MINUTE,
+  };
+}
+
+/**
+ * A provider saying "you are over your quota", told apart from a provider being
+ * broken.
+ *
+ * These are not the same event and must not produce the same response. A quota
+ * error clears by waiting; a 500 does not. Retrying a quota error is actively
+ * harmful — the SDK's default of three attempts spent three of the five
+ * requests a minute allows on a call that could not have succeeded.
+ */
+export interface QuotaError {
+  isQuota: true;
+  retryAfterSeconds: number;
+  message: string;
+}
+
+export function asQuotaError(error: unknown): QuotaError | null {
+  const status =
+    (error as { statusCode?: number; status?: number } | null)?.statusCode ??
+    (error as { status?: number } | null)?.status;
+  const message = error instanceof Error ? error.message : String(error);
+
+  const looksLikeQuota = status === 429 || /quota|rate.?limit|resource[_ ]exhausted/i.test(message);
+  if (!looksLikeQuota) return null;
+
+  // Providers state the wait in the error itself. Honouring it beats guessing,
+  // and guessing low is how a retry storm starts.
+  const stated =
+    /retry in ([\d.]+)\s*s/i.exec(message)?.[1] ?? /retryDelay"?:\s*"?(\d+)s/i.exec(message)?.[1];
+
+  return {
+    isQuota: true,
+    retryAfterSeconds: stated ? Math.ceil(Number(stated)) : 60,
+    message,
+  };
 }

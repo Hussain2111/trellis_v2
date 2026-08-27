@@ -407,6 +407,15 @@ export const modelRuns = pgTable(
     model: text('model').notNull(),
     promptTokens: integer('prompt_tokens'),
     completionTokens: integer('completion_tokens'),
+    /**
+     * Provider REQUESTS this row represents, which is not one.
+     *
+     * A single chat message runs a tool loop: a request, a tool result, a
+     * follow-up, sometimes another round. Counting rows counted messages, and
+     * every published rate limit counts requests — so the ledger read several
+     * times lower than the number the provider was actually enforcing.
+     */
+    calls: integer('calls'),
     /** `ok` | `error`. */
     status: text('status').notNull(),
     error: text('error'),

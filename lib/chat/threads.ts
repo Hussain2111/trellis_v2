@@ -142,11 +142,33 @@ export async function buildSystemPrompt(accountId: number): Promise<string> {
   });
 }
 
-/** Today's model calls, for rationing. Failures count — they spent the same quota. */
+/**
+ * Today's model CALLS, for rationing. Failures count — they spent the same
+ * quota as a success.
+ *
+ * Summed, not counted. A row is one chat message, and a message is a tool loop
+ * of several provider requests; every published rate limit counts requests. A
+ * row that predates the `calls` column stands for at least one.
+ */
 export async function callsToday(purpose: 'chat' | 'cards'): Promise<number> {
   const [row] = (await db().execute(sql`
-    select count(*)::int as n from model_runs
+    select coalesce(sum(coalesce(calls, 1)), 0)::int as n from model_runs
     where purpose = ${purpose} and created_at > now() - interval '24 hours'
+  `)) as unknown as { n: number }[];
+  return row?.n ?? 0;
+}
+
+/**
+ * Calls in the last sixty seconds, across every purpose.
+ *
+ * This is the limit that actually fires on a free tier — five requests a
+ * minute, where the daily cap is two hundred. A guard that only knows about the
+ * day never sees it coming.
+ */
+export async function callsLastMinute(): Promise<number> {
+  const [row] = (await db().execute(sql`
+    select coalesce(sum(coalesce(calls, 1)), 0)::int as n from model_runs
+    where created_at > now() - interval '60 seconds'
   `)) as unknown as { n: number }[];
   return row?.n ?? 0;
 }

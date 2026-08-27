@@ -57,6 +57,12 @@ export function ChatPanel({
 
       if (!res.ok) {
         setError(body.message ?? 'Something went wrong.');
+        // Not lost. The question goes back in the box so it can be sent again
+        // when the window rolls, instead of having to be retyped.
+        if (body.error === 'quota') {
+          setInput(text);
+          setMessages((m) => m.slice(0, -1));
+        }
         return;
       }
       setMessages((m) => [

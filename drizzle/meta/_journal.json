@@ -22,6 +22,13 @@
       "when": 1787774087185,
       "tag": "0002_puzzling_thena",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787825498383,
+      "tag": "0003_greedy_hellion",
+      "breakpoints": true
     }
   ]
 }

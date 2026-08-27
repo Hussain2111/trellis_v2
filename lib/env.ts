@@ -49,6 +49,15 @@ export const envSchema = z.object({
   MODEL_PRIMARY: z.string().default('google:gemini-3.6-flash'),
   MODEL_FALLBACK: z.string().optional(),
   GOOGLE_GENERATIVE_AI_API_KEY: z.string().optional(),
+  /**
+   * Provider requests allowed per minute. Configuration, not a constant,
+   * because it is a property of the plan rather than of the code — and it is
+   * small enough on a free tier that a single question can spend it.
+   * Observed value and date live in docs/quota.md.
+   */
+  MODEL_CALLS_PER_MINUTE: z.coerce.number().int().min(1).default(5),
+  /** Provider requests allowed per day, across chat and card generation. */
+  MODEL_CALLS_PER_DAY: z.coerce.number().int().min(1).default(200),
 
   // --- Cron auth ------------------------------------------------------------
   // Sent as `Authorization: Bearer $CRON_SECRET` by Vercel's own cron caller

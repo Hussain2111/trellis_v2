@@ -6,13 +6,20 @@ import { chatTools } from '@/lib/chat/tools';
 import {
   appendMessage,
   buildSystemPrompt,
+  callsLastMinute,
   callsToday,
   selfAccountId,
   threadCardId,
   threadMessages,
   titleThread,
 } from '@/lib/chat/threads';
-import { checkHeadroom, resolveModel } from '@/lib/model/provider';
+import {
+  asQuotaError,
+  checkHeadroom,
+  maxStepsFor,
+  quotaCaps,
+  resolveModel,
+} from '@/lib/model/provider';
 import { stripUnbackedSentences } from '@/lib/validate/numbers';
 
 export const dynamic = 'force-dynamic';
@@ -22,8 +29,6 @@ const bodySchema = z.object({
   threadId: z.number().int(),
   message: z.string().min(1).max(4000),
 });
-
-const CAPS = { dailyCalls: 200, reservedForCards: 40 };
 
 /**
  * Buffered, validated, then rendered — deliberately not streamed.
@@ -57,9 +62,24 @@ export async function POST(request: Request): Promise<Response> {
   // title — a thread opened from a note was already named after the note.
   if (history.filter((m) => m.role === 'user').length === 1) await titleThread(threadId, message);
 
-  const headroom = await checkHeadroom('chat', { callsToday }, CAPS);
+  const caps = quotaCaps();
+  const headroom = await checkHeadroom('chat', { callsToday, callsLastMinute }, caps);
   if (!headroom.allowed) {
-    return Response.json({ error: 'quota', message: headroom.reason }, { status: 429 });
+    return Response.json(
+      {
+        error: 'quota',
+        message: headroom.retryAfterSeconds
+          ? `${headroom.reason} Try again in about ${headroom.retryAfterSeconds} seconds.`
+          : headroom.reason,
+        retryAfterSeconds: headroom.retryAfterSeconds,
+      },
+      {
+        status: 429,
+        ...(headroom.retryAfterSeconds
+          ? { headers: { 'retry-after': String(headroom.retryAfterSeconds) } }
+          : {}),
+      },
+    );
   }
 
   let model;
@@ -98,9 +118,14 @@ export async function POST(request: Request): Promise<Response> {
         content: m.content,
       })),
       tools,
-      // A tool loop needs room, but not unbounded room — a runaway loop on a
-      // rationed free tier is expensive in the only currency this app has.
-      stopWhen: stepCountIs(8),
+      // Every step is another provider request, so the ceiling is derived from
+      // the per-minute limit rather than picked. A fixed 8 blew a 5-a-minute
+      // budget from inside a single call, where no pre-flight check can reach.
+      stopWhen: stepCountIs(maxStepsFor(caps)),
+      // The SDK's default is three attempts. On a quota error that spends three
+      // of the five requests a minute allows, on a call that could not have
+      // succeeded — so retrying is handled here, by not doing it.
+      maxRetries: 0,
       temperature: 0.4,
     });
 
@@ -135,6 +160,7 @@ export async function POST(request: Request): Promise<Response> {
         promptTokens: result.usage?.inputTokens ?? null,
         completionTokens: result.usage?.outputTokens ?? null,
         status: 'ok',
+        calls: result.steps.length,
         durationMs: Date.now() - started,
       });
 
@@ -146,6 +172,8 @@ export async function POST(request: Request): Promise<Response> {
       toolsUsed: result.steps.flatMap((s) => s.toolCalls.map((c) => c.toolName)),
     });
   } catch (error) {
+    const quota = asQuotaError(error);
+
     await db()
       .insert(modelRuns)
       .values({
@@ -155,8 +183,29 @@ export async function POST(request: Request): Promise<Response> {
         model: model.modelId,
         status: 'error',
         error: error instanceof Error ? error.message : String(error),
+        // A rejected call still reached the provider and still counted against
+        // the limit. Recording it as zero would let the ledger drift below what
+        // the provider is actually counting, which is how the guard gets
+        // quietly overrun.
+        calls: 1,
         durationMs: Date.now() - started,
       });
+
+    // A quota error is not a failure of this app and clears by waiting. Saying
+    // so — with the provider's own number for how long — is a different message
+    // from "something went wrong", and the difference matters to whoever is
+    // sitting in front of it.
+    if (quota) {
+      return Response.json(
+        {
+          error: 'quota',
+          message: `The model is over its request limit for the moment. Try again in about ${quota.retryAfterSeconds} seconds.`,
+          retryAfterSeconds: quota.retryAfterSeconds,
+        },
+        { status: 429, headers: { 'retry-after': String(quota.retryAfterSeconds) } },
+      );
+    }
+
     return Response.json(
       { error: 'failed', message: error instanceof Error ? error.message : String(error) },
       { status: 500 },

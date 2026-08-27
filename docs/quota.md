@@ -1,47 +1,64 @@
-# Model quota
+# Model quota — observed, not looked up
 
-**Do not copy a number from a blog into this file.** Free-tier limits were cut
-substantially in late 2025 and are no longer published as a static table —
-providers surface live limits per project in their own console. Read the
-project's actual limits and record them here with the date observed.
+Free-tier limits changed substantially in late 2025 and are no longer published
+as a static table. Every number here was read off a real response, with the date
+it was read. **Do not copy a figure into this file from a blog post or from
+memory.** A wrong number here is worse than no number, because the guard built
+on it will look like it is working.
 
-## Observed limits
+## `google:gemini-3.6-flash`, free tier
 
-| Date observed  | Provider | Model | Limit | Where read                            |
-| -------------- | -------- | ----- | ----- | ------------------------------------- |
-| _not yet read_ | google   | —     | —     | AI Studio → the project's rate limits |
+| Limit               | Value          | How it was established                                                                                                    |
+| ------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Requests per minute | **5**          | `[VERIFIED-LIVE]` 2026-08-27, from the provider's own error                                                               |
+| Requests per day    | _not observed_ | The daily cap has never been reached; `MODEL_CALLS_PER_DAY` defaults to 200 as a self-imposed ceiling, not a measured one |
 
-## The unit is calls, not messages
+The response that established it, verbatim:
 
-One chat message becomes **several model calls** once the tool loop runs: the
-initial request, a tool result fed back, a follow-up, and sometimes a repair
-attempt when the numeric validator rejects a figure. A cap expressed in
-messages per day is silently several times looser than it reads.
+```
+You exceeded your current quota, please check your plan and billing details.
+* Quota exceeded for metric:
+  generativelanguage.googleapis.com/generate_content_free_tier_requests,
+  limit: 5, model: gemini-3.6-flash
+Please retry in 12.174274113s.
+```
 
-`checkHeadroom` in `lib/model/provider.ts` counts calls. Measure the real
-calls-per-message ratio from a handful of live turns and write it here next to
-the cap, so a later surprise is diagnosable rather than mysterious.
+## Why five is smaller than it sounds
 
-| Measurement                       | Value              | When |
-| --------------------------------- | ------------------ | ---- |
-| Calls per chat message (observed) | _not yet measured_ | —    |
+**The unit is requests, not messages,** and one chat message is a tool loop. A
+question that needs three tool calls costs four requests: the first call, two
+follow-ups carrying tool results, and the answer. So **one question can spend
+most of a minute's allowance**, and two in quick succession cannot both run.
 
-## Rationing
+This is why `stopWhen` is derived rather than fixed. `maxStepsFor()` sets the
+step ceiling from `MODEL_CALLS_PER_MINUTE`, holding one request back so a
+follow-up question does not have to wait out the whole window. A fixed ceiling
+of 8 steps — which is what it was — could exceed a 5-a-minute budget from inside
+a single call, where no pre-flight check can reach it.
 
-Scheduled card generation **reserves its allowance first**. Chat draws from what
-remains. Heavy chat use must not be able to starve the dashboard, because the
-dashboard is the surface that runs while nobody is watching.
+## What the guards are
 
-Failures count against the ledger. A failed call spent the same quota as a
-successful one, and a ledger that only counts successes will let a retry loop
-walk straight through the cap.
+| Guard               | Where              | What it does                                                                                                    |
+| ------------------- | ------------------ | --------------------------------------------------------------------------------------------------------------- |
+| Per-minute headroom | `checkHeadroom`    | Refuses to start a turn that could not finish inside the limit. Checked **first**, because it clears by waiting |
+| Daily headroom      | `checkHeadroom`    | Self-imposed. Card generation reserves its share first, so chat cannot starve the dashboard                     |
+| Step ceiling        | `maxStepsFor`      | Caps requests inside one turn                                                                                   |
+| No retries          | `maxRetries: 0`    | The SDK's default of three attempts spent three of five requests on a call that could not have succeeded        |
+| Ledger in requests  | `model_runs.calls` | Rows are messages; the column is requests. Counting rows undercounted by the length of the tool loop            |
 
-## Commercialisation line item, not an optional upgrade
+Failures count against the ledger. A rejected call still reached the provider
+and still counted there, so recording it as zero would let the ledger drift
+below what is actually being enforced — which is how a guard gets quietly
+overrun.
 
-Free-tier usage is used to improve the provider's products. Paid-tier usage is
-not.
+## Changing tier
 
-That is acceptable while this serves one person's own account. **It is not
-acceptable the moment another person's Instagram data flows through it.** Moving
-to a paid tier is a precondition of the first non-owner user, alongside Meta App
-Review — not a later optimisation.
+`MODEL_CALLS_PER_MINUTE` and `MODEL_CALLS_PER_DAY` are environment variables, so
+moving to a paid tier is a configuration change and a redeploy. Raising the
+per-minute value also raises the step ceiling, and the chat gets deeper tool
+loops without a code change.
+
+Note the commercial line from the plan: free-tier usage is used to improve the
+provider's products and paid-tier usage is not. Acceptable for one owner's own
+account; **not acceptable the moment another person's Instagram data flows
+through it.**

@@ -26,7 +26,13 @@ export async function POST(request: Request): Promise<Response> {
   if (!accountId) return Response.json({ error: 'no_account' }, { status: 409 });
 
   try {
-    return Response.json(await generateInsightCards(accountId));
+    const result = await generateInsightCards(accountId);
+    // A wait is not a failure, and the refresh button should say which it got.
+    return Response.json(result, {
+      ...(result.retryAfterSeconds
+        ? { status: 429, headers: { 'retry-after': String(result.retryAfterSeconds) } }
+        : {}),
+    });
   } catch (error) {
     return Response.json(
       { error: error instanceof Error ? error.message : String(error) },

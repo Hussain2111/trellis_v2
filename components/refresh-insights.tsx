@@ -24,8 +24,15 @@ export function RefreshInsights() {
       const res = await fetch('/api/insights', { method: 'POST' });
       const body = await res.json();
       if (!res.ok) {
+        // Over the request limit is a wait, not a breakage. Saying "try again
+        // in 40 seconds" is a different instruction from "that failed", and
+        // only one of them is worth acting on.
         setState('error');
-        setNote(body.error ?? 'Could not generate notes.');
+        setNote(
+          body.retryAfterSeconds
+            ? `Over the request limit. Try again in about ${body.retryAfterSeconds} seconds.`
+            : (body.reason ?? body.error ?? 'Could not generate notes.'),
+        );
         return;
       }
       setState('idle');

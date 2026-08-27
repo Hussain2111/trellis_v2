@@ -3,7 +3,9 @@ import { z } from 'zod';
 import { desc, eq } from 'drizzle-orm';
 import { db } from '../db/client';
 import { insightBatches, insightCards } from '../db/schema';
-import { resolveModel } from '../model/provider';
+import { asQuotaError, checkHeadroom, quotaCaps, resolveModel } from '../model/provider';
+import { callsLastMinute, callsToday } from '../chat/threads';
+import { modelRuns } from '../db/schema';
 import { validateClaims } from '../validate/numbers';
 import { buildCardPayload } from './payload';
 import { postsByIds, type NamedPost } from '../chat/queries';
@@ -67,6 +69,8 @@ export interface GenerateResult {
   kept: number;
   dropped: number;
   reason?: string;
+  /** Set when the provider or the ledger said to wait rather than to stop. */
+  retryAfterSeconds?: number;
 }
 
 export async function generateInsightCards(accountId: number): Promise<GenerateResult> {
@@ -86,7 +90,35 @@ export async function generateInsightCards(accountId: number): Promise<GenerateR
     return { batchId: batch!.id, kept: 0, dropped: 0, reason: built.reason };
   }
 
+  // This path used to call the model without asking the ledger and without
+  // recording that it had. Two consequences, both bad: the reservation held
+  // back for card generation was measured against a counter that never moved,
+  // and a refresh could spend the per-minute allowance out from under the chat
+  // with nothing to show for it afterwards.
+  const caps = quotaCaps();
+  const headroom = await checkHeadroom('cards', { callsToday, callsLastMinute }, caps);
+  if (!headroom.allowed) {
+    const [batch] = await db()
+      .insert(insightBatches)
+      .values({
+        accountId,
+        status: 'fallback',
+        reason: headroom.reason,
+        cardsRequested: 0,
+        cardsKept: 0,
+      })
+      .returning();
+    return {
+      batchId: batch!.id,
+      kept: 0,
+      dropped: 0,
+      reason: headroom.reason,
+      retryAfterSeconds: headroom.retryAfterSeconds,
+    };
+  }
+
   const model = resolveModel();
+  const started = Date.now();
 
   let generated: z.infer<typeof cardSchema>;
   try {
@@ -95,20 +127,63 @@ export async function generateInsightCards(accountId: number): Promise<GenerateR
       schema: cardSchema,
       system: SYSTEM,
       prompt: `Here is the account's data. Write 4 to 6 notes.\n\n${JSON.stringify(built.payload)}`,
+      // Retrying a quota error spends more of the same quota on a call that
+      // could not have succeeded. Handled by not doing it.
+      maxRetries: 0,
       temperature: 0.5,
     });
     generated = result.object;
+
+    await db()
+      .insert(modelRuns)
+      .values({
+        accountId,
+        purpose: 'cards',
+        provider: model.provider,
+        model: model.modelId,
+        promptTokens: result.usage?.inputTokens ?? null,
+        completionTokens: result.usage?.outputTokens ?? null,
+        status: 'ok',
+        calls: 1,
+        durationMs: Date.now() - started,
+      });
   } catch (error) {
+    const quota = asQuotaError(error);
+
+    await db()
+      .insert(modelRuns)
+      .values({
+        accountId,
+        purpose: 'cards',
+        provider: model.provider,
+        model: model.modelId,
+        status: 'error',
+        error: error instanceof Error ? error.message : String(error),
+        // It reached the provider and counted against the limit there.
+        calls: 1,
+        durationMs: Date.now() - started,
+      });
+
     const [batch] = await db()
       .insert(insightBatches)
       .values({
         accountId,
         status: 'fallback',
-        reason: error instanceof Error ? error.message : 'generation failed',
+        reason: quota
+          ? `the model is over its request limit; try again in about ${quota.retryAfterSeconds} seconds`
+          : error instanceof Error
+            ? error.message
+            : 'generation failed',
         model: model.modelId,
       })
       .returning();
-    return { batchId: batch!.id, kept: 0, dropped: 0, reason: 'generation failed' };
+    return {
+      batchId: batch!.id,
+      kept: 0,
+      dropped: 0,
+      reason: quota ? 'over the request limit' : 'generation failed',
+      retryAfterSeconds: quota?.retryAfterSeconds,
+    };
   }
 
   // The guarantee. A card stating a figure the payload cannot support, or

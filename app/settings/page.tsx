@@ -1,6 +1,8 @@
 import { sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { env } from '@/lib/env';
+import { maxStepsFor, quotaCaps } from '@/lib/model/provider';
+import { callsLastMinute, callsToday } from '@/lib/chat/threads';
 import { ALL_SCOPES, REQUIRED_SCOPES, SCOPE_PURPOSE } from '@/lib/graph/scopes';
 import { formatRiyadh } from '@/lib/time';
 import { Badge, Panel, PanelHeader } from '@/components/ui/primitives';
@@ -42,7 +44,16 @@ async function databaseStatus(): Promise<{ ok: boolean; detail: string; lastBeat
 
 export default async function SettingsPage() {
   const e = env();
-  const database = await databaseStatus();
+  const caps = quotaCaps();
+
+  // The instrument panel, and the reason it exists: the limit that stops this
+  // app is requests per minute, and it is invisible everywhere else.
+  const [database, lastMinute, chatToday, cardsToday] = await Promise.all([
+    databaseStatus(),
+    callsLastMinute().catch(() => 0),
+    callsToday('chat').catch(() => 0),
+    callsToday('cards').catch(() => 0),
+  ]);
 
   const rows: { label: string; value: string; tone?: 'good' | 'bad' }[] = [
     { label: 'Graph API version requested', value: e.GRAPH_API_VERSION },
@@ -66,6 +77,20 @@ export default async function SettingsPage() {
       label: 'Model API key',
       value: e.GOOGLE_GENERATIVE_AI_API_KEY ? 'set' : 'not set',
       tone: e.GOOGLE_GENERATIVE_AI_API_KEY ? 'good' : 'bad',
+    },
+    {
+      // Requests, not messages. One chat message is a whole tool loop.
+      label: 'Requests in the last minute',
+      value: `${lastMinute} of ${caps.callsPerMinute}`,
+      tone: lastMinute >= caps.callsPerMinute ? 'bad' : 'good',
+    },
+    {
+      label: 'Requests today',
+      value: `${chatToday + cardsToday} of ${caps.dailyCalls} (${chatToday} chat, ${cardsToday} notes)`,
+    },
+    {
+      label: 'Steps allowed per question',
+      value: String(maxStepsFor(caps)),
     },
   ];
 
