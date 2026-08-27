@@ -22,7 +22,9 @@ export function RefreshInsights() {
     setNote(null);
     try {
       const res = await fetch('/api/insights', { method: 'POST' });
-      const body = await res.json();
+      // Not every failure answers in JSON. Parsing one that does not used to
+      // throw into the catch below and report a network problem.
+      const body = (await res.json().catch(() => null)) ?? {};
       if (!res.ok) {
         // Over the request limit is a wait, not a breakage. Saying "try again
         // in 40 seconds" is a different instruction from "that failed", and
@@ -31,7 +33,7 @@ export function RefreshInsights() {
         setNote(
           body.retryAfterSeconds
             ? `Over the request limit. Try again in about ${body.retryAfterSeconds} seconds.`
-            : (body.reason ?? body.error ?? 'Could not generate notes.'),
+            : (body.message ?? body.reason ?? `The server returned an error (${res.status}).`),
         );
         return;
       }
@@ -42,7 +44,7 @@ export function RefreshInsights() {
       router.refresh();
     } catch {
       setState('error');
-      setNote('Could not reach the server.');
+      setNote('Could not reach the server — the request never completed.');
     }
   }
 

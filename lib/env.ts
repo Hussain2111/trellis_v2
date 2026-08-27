@@ -72,12 +72,34 @@ export type Env = z.infer<typeof envSchema>;
 
 let cached: Env | null = null;
 
+/**
+ * A variable set to nothing is a variable that is not set.
+ *
+ * `.env` files are full of `KEY=` — a line left blank rather than deleted, or
+ * one a hosting dashboard wrote for a field nobody filled in. Zod sees an empty
+ * string, not `undefined`, so a `.default()` never applies and a numeric field
+ * coerces `''` to `0` and then fails its own minimum. The whole environment
+ * then refuses to parse, `env()` throws, and every route that touches it
+ * returns a bodiless 500.
+ *
+ * That is exactly how `MODEL_CALLS_PER_MINUTE=` turned the chat into "Could not
+ * reach the server." Blank means absent, here, once, for every key.
+ */
+function withoutBlanks(source: NodeJS.ProcessEnv): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (typeof value === 'string' && value.trim() === '') continue;
+    out[key] = value;
+  }
+  return out;
+}
+
 export function env(): Env {
   if (typeof window !== 'undefined') {
     throw new Error('lib/env.ts was imported from the browser. Secrets are server-only.');
   }
   if (cached) return cached;
-  const parsed = envSchema.safeParse(process.env);
+  const parsed = envSchema.safeParse(withoutBlanks(process.env));
   if (!parsed.success) {
     const detail = parsed.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`).join('\n');
     throw new Error(
@@ -90,5 +112,5 @@ export function env(): Env {
 
 /** Test seam: force a specific env without touching process.env. */
 export function __setEnvForTests(value: Partial<Env> | null): void {
-  cached = value ? (envSchema.parse({ ...process.env, ...value }) as Env) : null;
+  cached = value ? (envSchema.parse({ ...withoutBlanks(process.env), ...value }) as Env) : null;
 }

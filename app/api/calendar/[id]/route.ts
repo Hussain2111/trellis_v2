@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { respond } from '@/lib/api/respond';
 import { selfAccountId } from '@/lib/chat/threads';
 import { deleteEntry, markPublished, updateEntry } from '@/lib/calendar/entries';
 
@@ -19,34 +20,38 @@ export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ): Promise<Response> {
-  const accountId = await selfAccountId();
-  if (!accountId) return Response.json({ error: 'no_account' }, { status: 409 });
+  return respond(async () => {
+    const accountId = await selfAccountId();
+    if (!accountId) return Response.json({ error: 'no_account' }, { status: 409 });
 
-  const { id } = await context.params;
-  const parsed = patchSchema.safeParse(await request.json());
-  if (!parsed.success) return Response.json({ error: 'bad request' }, { status: 400 });
+    const { id } = await context.params;
+    const parsed = patchSchema.safeParse(await request.json());
+    if (!parsed.success) return Response.json({ error: 'bad request' }, { status: 400 });
 
-  const { action, scheduledFor, ...rest } = parsed.data;
+    const { action, scheduledFor, ...rest } = parsed.data;
 
-  const entry =
-    action === 'publish'
-      ? await markPublished(accountId, Number(id))
-      : await updateEntry(accountId, Number(id), {
-          ...rest,
-          ...(scheduledFor ? { scheduledFor: new Date(scheduledFor) } : {}),
-        });
+    const entry =
+      action === 'publish'
+        ? await markPublished(accountId, Number(id))
+        : await updateEntry(accountId, Number(id), {
+            ...rest,
+            ...(scheduledFor ? { scheduledFor: new Date(scheduledFor) } : {}),
+          });
 
-  if (!entry) return Response.json({ error: 'not found' }, { status: 404 });
-  return Response.json({ entry });
+    if (!entry) return Response.json({ error: 'not found' }, { status: 404 });
+    return Response.json({ entry });
+  });
 }
 
 export async function DELETE(
   _request: Request,
   context: { params: Promise<{ id: string }> },
 ): Promise<Response> {
-  const accountId = await selfAccountId();
-  if (!accountId) return Response.json({ error: 'no_account' }, { status: 409 });
-  const { id } = await context.params;
-  await deleteEntry(accountId, Number(id));
-  return Response.json({ ok: true });
+  return respond(async () => {
+    const accountId = await selfAccountId();
+    if (!accountId) return Response.json({ error: 'no_account' }, { status: 409 });
+    const { id } = await context.params;
+    await deleteEntry(accountId, Number(id));
+    return Response.json({ ok: true });
+  });
 }

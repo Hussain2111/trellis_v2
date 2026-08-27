@@ -53,24 +53,41 @@ export function ChatPanel({
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ threadId, message: text }),
       });
-      const body = await res.json();
 
-      if (!res.ok) {
-        setError(body.message ?? 'Something went wrong.');
+      // A failing route can answer with something that is not JSON at all — an
+      // empty 500, a proxy's error page. Parsing that used to throw into the
+      // catch below, which reports a network problem, and a server-side fault
+      // then read as "your connection is down". They are different problems
+      // and only one of them is worth retrying by hand.
+      const body: {
+        answer?: string;
+        dropped?: number;
+        error?: string;
+        message?: string;
+      } | null = await res.json().catch(() => null);
+
+      if (!res.ok || !body) {
+        setError(
+          body?.message ??
+            `The server returned an error (${res.status}). It has been logged with the details.`,
+        );
         // Not lost. The question goes back in the box so it can be sent again
         // when the window rolls, instead of having to be retyped.
-        if (body.error === 'quota') {
+        if (body?.error === 'quota') {
           setInput(text);
           setMessages((m) => m.slice(0, -1));
         }
         return;
       }
+
       setMessages((m) => [
         ...m,
-        { role: 'assistant', content: body.answer, dropped: body.dropped },
+        { role: 'assistant', content: body.answer ?? '', dropped: body.dropped },
       ]);
     } catch {
-      setError('Could not reach the server.');
+      // Genuinely unreachable: the request never completed. Everything the
+      // server said, including that it broke, is handled above.
+      setError('Could not reach the server — the request never completed.');
     } finally {
       setPending(false);
     }

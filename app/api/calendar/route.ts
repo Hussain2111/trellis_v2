@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { respond } from '@/lib/api/respond';
 import { selfAccountId } from '@/lib/chat/threads';
 import { createEntry, listEntries } from '@/lib/calendar/entries';
 import { riyadhInstant } from '@/lib/time';
@@ -29,25 +30,29 @@ const entrySchema = z.object({
 });
 
 export async function GET(): Promise<Response> {
-  // The overdue count moved to /api/alerts, which serves the banners and the
-  // nav badge from one request. Two endpoints answering the same question is
-  // two places for the answer to drift.
-  const accountId = await selfAccountId();
-  if (!accountId) return Response.json({ entries: [] });
-  return Response.json({ entries: await listEntries(accountId) });
+  return respond(async () => {
+    // The overdue count moved to /api/alerts, which serves the banners and the
+    // nav badge from one request. Two endpoints answering the same question is
+    // two places for the answer to drift.
+    const accountId = await selfAccountId();
+    if (!accountId) return Response.json({ entries: [] });
+    return Response.json({ entries: await listEntries(accountId) });
+  });
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const accountId = await selfAccountId();
-  if (!accountId) return Response.json({ error: 'no_account' }, { status: 409 });
+  return respond(async () => {
+    const accountId = await selfAccountId();
+    if (!accountId) return Response.json({ error: 'no_account' }, { status: 409 });
 
-  const parsed = entrySchema.safeParse(await request.json());
-  if (!parsed.success) return Response.json({ error: 'bad request' }, { status: 400 });
+    const parsed = entrySchema.safeParse(await request.json());
+    if (!parsed.success) return Response.json({ error: 'bad request' }, { status: 400 });
 
-  const { scheduledFor, day, timeOfDay, ...rest } = parsed.data;
-  const when = day ? riyadhInstant(day, timeOfDay) : scheduledFor ? new Date(scheduledFor) : null;
-  if (!when) return Response.json({ error: 'no date given' }, { status: 400 });
+    const { scheduledFor, day, timeOfDay, ...rest } = parsed.data;
+    const when = day ? riyadhInstant(day, timeOfDay) : scheduledFor ? new Date(scheduledFor) : null;
+    if (!when) return Response.json({ error: 'no date given' }, { status: 400 });
 
-  const entry = await createEntry(accountId, { ...rest, scheduledFor: when });
-  return Response.json({ entry });
+    const entry = await createEntry(accountId, { ...rest, scheduledFor: when });
+    return Response.json({ entry });
+  });
 }

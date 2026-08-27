@@ -118,14 +118,22 @@ export async function deleteThread(accountId: number, threadId: number) {
     .where(and(eq(chatThreads.accountId, accountId), eq(chatThreads.id, threadId)));
 }
 
-/** The thread's own card reference, read from the row rather than trusted from the client. */
-export async function threadCardId(threadId: number): Promise<number | null> {
+/**
+ * The thread, if it belongs to this account.
+ *
+ * Returns the row rather than just its card reference, so a caller can tell a
+ * thread with no card apart from a thread that is not there. Those used to be
+ * the same answer, and the second one then failed further down as a foreign key
+ * violation — a 500 about database internals, where the truthful answer is that
+ * the conversation does not exist.
+ */
+export async function findThread(accountId: number, threadId: number) {
   const [row] = await db()
-    .select({ sourceCardId: chatThreads.sourceCardId })
+    .select()
     .from(chatThreads)
-    .where(eq(chatThreads.id, threadId))
+    .where(and(eq(chatThreads.accountId, accountId), eq(chatThreads.id, threadId)))
     .limit(1);
-  return row?.sourceCardId ?? null;
+  return row ?? null;
 }
 
 /** Built fresh every turn from real state, so it can never describe a stale account. */

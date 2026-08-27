@@ -1,4 +1,5 @@
 import { currentAlerts } from '@/lib/alerts';
+import { respond } from '@/lib/api/respond';
 import { selfAccountId } from '@/lib/chat/threads';
 
 export const dynamic = 'force-dynamic';
@@ -11,7 +12,9 @@ export const dynamic = 'force-dynamic';
  * every navigation.
  */
 export async function GET(): Promise<Response> {
-  const accountId = await selfAccountId();
-  if (!accountId) return Response.json({ alerts: [], overdue: 0 });
-  return Response.json(await currentAlerts(accountId));
+  return respond(async () => {
+    const accountId = await selfAccountId();
+    if (!accountId) return Response.json({ alerts: [], overdue: 0 });
+    return Response.json(await currentAlerts(accountId));
+  });
 }

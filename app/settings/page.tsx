@@ -42,18 +42,42 @@ async function databaseStatus(): Promise<{ ok: boolean; detail: string; lastBeat
   }
 }
 
+/**
+ * Reports what it can read, and says so when it cannot.
+ *
+ * A failure here almost always means one thing — a migration that has not been
+ * run against this database — so it names the error rather than substituting a
+ * plausible number for it.
+ */
+async function modelUsage(): Promise<
+  { ok: true; lastMinute: number; chat: number; cards: number } | { ok: false; error: string }
+> {
+  try {
+    const [lastMinute, chat, cards] = await Promise.all([
+      callsLastMinute(),
+      callsToday('chat'),
+      callsToday('cards'),
+    ]);
+    return { ok: true, lastMinute, chat, cards };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message.slice(0, 120) : 'unknown error',
+    };
+  }
+}
+
 export default async function SettingsPage() {
   const e = env();
   const caps = quotaCaps();
 
   // The instrument panel, and the reason it exists: the limit that stops this
   // app is requests per minute, and it is invisible everywhere else.
-  const [database, lastMinute, chatToday, cardsToday] = await Promise.all([
-    databaseStatus(),
-    callsLastMinute().catch(() => 0),
-    callsToday('chat').catch(() => 0),
-    callsToday('cards').catch(() => 0),
-  ]);
+  // `.catch(() => 0)` here would have been worse than useless: a missing column
+  // — a migration that has not been run against this database — would render as
+  // a confident "0 of 5" on the one page whose entire job is to report what the
+  // running function actually resolved.
+  const [database, usage] = await Promise.all([databaseStatus(), modelUsage()]);
 
   const rows: { label: string; value: string; tone?: 'good' | 'bad' }[] = [
     { label: 'Graph API version requested', value: e.GRAPH_API_VERSION },
@@ -81,12 +105,17 @@ export default async function SettingsPage() {
     {
       // Requests, not messages. One chat message is a whole tool loop.
       label: 'Requests in the last minute',
-      value: `${lastMinute} of ${caps.callsPerMinute}`,
-      tone: lastMinute >= caps.callsPerMinute ? 'bad' : 'good',
+      value: usage.ok
+        ? `${usage.lastMinute} of ${caps.callsPerMinute}`
+        : `cannot read — ${usage.error}`,
+      tone: !usage.ok || usage.lastMinute >= caps.callsPerMinute ? 'bad' : 'good',
     },
     {
       label: 'Requests today',
-      value: `${chatToday + cardsToday} of ${caps.dailyCalls} (${chatToday} chat, ${cardsToday} notes)`,
+      value: usage.ok
+        ? `${usage.chat + usage.cards} of ${caps.dailyCalls} (${usage.chat} chat, ${usage.cards} notes)`
+        : 'cannot read',
+      tone: usage.ok ? undefined : 'bad',
     },
     {
       label: 'Steps allowed per question',
