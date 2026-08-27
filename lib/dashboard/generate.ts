@@ -4,7 +4,7 @@ import { desc, eq } from 'drizzle-orm';
 import { db } from '../db/client';
 import { insightBatches, insightCards } from '../db/schema';
 import { asQuotaError, checkHeadroom, quotaCaps, resolveModel } from '../model/provider';
-import { callsLastMinute, callsToday } from '../chat/threads';
+import { callsLastMinute, callsToday, oldestCallInWindow } from '../chat/threads';
 import { modelRuns } from '../db/schema';
 import { validateClaims } from '../validate/numbers';
 import { buildCardPayload } from './payload';
@@ -96,7 +96,11 @@ export async function generateInsightCards(accountId: number): Promise<GenerateR
   // and a refresh could spend the per-minute allowance out from under the chat
   // with nothing to show for it afterwards.
   const caps = quotaCaps();
-  const headroom = await checkHeadroom('cards', { callsToday, callsLastMinute }, caps);
+  const headroom = await checkHeadroom(
+    'cards',
+    { callsToday, callsLastMinute, oldestCallInWindow },
+    caps,
+  );
   if (!headroom.allowed) {
     const [batch] = await db()
       .insert(insightBatches)

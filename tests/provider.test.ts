@@ -4,6 +4,7 @@ import {
   checkHeadroom,
   maxStepsFor,
   parseModelRef,
+  questionsLeft,
   type QuotaLedger,
 } from '../lib/model/provider';
 
@@ -58,7 +59,7 @@ describe('quota rationing', () => {
 
   it('explains a refusal rather than degrading silently', async () => {
     const headroom = await checkHeadroom('chat', ledger(80, 0), caps);
-    expect(headroom.reason).toMatch(/reserved for insight cards/);
+    expect(headroom.reason).toMatch(/held for the dashboard notes/);
   });
 });
 
@@ -126,5 +127,66 @@ describe('telling a quota error from a broken provider', () => {
     // not produce the same response.
     expect(asQuotaError(new Error('fetch failed'))).toBeNull();
     expect(asQuotaError(new Error('model not found'))).toBeNull();
+  });
+});
+
+/**
+ * Twenty requests a day is the binding constraint on this whole product.
+ *
+ * `[VERIFIED-LIVE]` 2026-08-27, AI Studio: RPD 20 for gemini-3.6-flash on the
+ * free tier, against a 28-day peak of 44. The previous default of 200 was
+ * invented before the number was known and would not have stopped anything.
+ */
+describe('the daily limit, at its real size', () => {
+  const free = { dailyCalls: 20, reservedForCards: 4, callsPerMinute: 5 };
+
+  it('is about four questions a day, not two hundred', () => {
+    // 20 total, 4 held for the dashboard notes, 4 requests per question.
+    expect(questionsLeft(0, free)).toBe(4);
+  });
+
+  it('counts down as the day is spent', () => {
+    expect(questionsLeft(4, free)).toBe(3);
+    expect(questionsLeft(12, free)).toBe(1);
+    expect(questionsLeft(16, free)).toBe(0);
+  });
+
+  it('never promises a question it cannot afford', () => {
+    // Three requests left is not a question when a question can cost four.
+    expect(questionsLeft(13, free)).toBe(0);
+  });
+
+  it('says when the next slot frees rather than "come back tomorrow"', async () => {
+    // The window is rolling, so it frees gradually. An oldest call twenty hours
+    // ago means roughly four hours until the first slot returns.
+    const twentyHoursAgo = new Date(Date.now() - 20 * 3_600_000);
+    const headroom = await checkHeadroom(
+      'chat',
+      {
+        callsToday: async (purpose) => (purpose === 'chat' ? 16 : 0),
+        callsLastMinute: async () => 0,
+        oldestCallInWindow: async () => twentyHoursAgo,
+      },
+      free,
+    );
+
+    expect(headroom.allowed).toBe(false);
+    expect(headroom.retryAfterSeconds).toBeGreaterThan(3 * 3600);
+    expect(headroom.retryAfterSeconds).toBeLessThan(5 * 3600);
+    expect(headroom.reason).toMatch(/20 requests are spent/);
+  });
+
+  it('refuses without a time when it has never made a call', async () => {
+    const headroom = await checkHeadroom(
+      'chat',
+      {
+        callsToday: async (purpose) => (purpose === 'chat' ? 16 : 0),
+        callsLastMinute: async () => 0,
+        oldestCallInWindow: async () => null,
+      },
+      free,
+    );
+    expect(headroom.allowed).toBe(false);
+    expect(headroom.retryAfterSeconds).toBeUndefined();
   });
 });

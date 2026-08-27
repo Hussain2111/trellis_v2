@@ -167,6 +167,25 @@ export async function callsToday(purpose: 'chat' | 'cards'): Promise<number> {
 }
 
 /**
+ * When the oldest call still inside the 24-hour window was made.
+ *
+ * The daily cap is a rolling window, so this is the moment the first slot frees
+ * again. A true statement about this app's own guard, which is not the same as
+ * guessing when the provider resets its counter.
+ */
+export async function oldestCallInWindow(): Promise<Date | null> {
+  const [row] = (await db().execute(sql`
+    select min(created_at) as oldest from model_runs
+    where created_at > now() - interval '24 hours'
+  `)) as unknown as { oldest: string | Date | null }[];
+  if (!row?.oldest) return null;
+  // The driver hands back a raw string for an aggregate over a timestamp, and
+  // this is the third time in this project that has needed coercing at a
+  // boundary rather than being assumed to arrive as a Date.
+  return row.oldest instanceof Date ? row.oldest : new Date(row.oldest);
+}
+
+/**
  * Calls in the last sixty seconds, across every purpose.
  *
  * This is the limit that actually fires on a free tier — five requests a

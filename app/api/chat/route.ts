@@ -9,6 +9,7 @@ import {
   buildSystemPrompt,
   callsLastMinute,
   callsToday,
+  oldestCallInWindow,
   selfAccountId,
   findThread,
   threadMessages,
@@ -73,13 +74,17 @@ export async function POST(request: Request): Promise<Response> {
     if (history.filter((m) => m.role === 'user').length === 1) await titleThread(threadId, message);
 
     const caps = quotaCaps();
-    const headroom = await checkHeadroom('chat', { callsToday, callsLastMinute }, caps);
+    const headroom = await checkHeadroom(
+      'chat',
+      { callsToday, callsLastMinute, oldestCallInWindow },
+      caps,
+    );
     if (!headroom.allowed) {
       return Response.json(
         {
           error: 'quota',
           message: headroom.retryAfterSeconds
-            ? `${headroom.reason} Try again in about ${headroom.retryAfterSeconds} seconds.`
+            ? `${headroom.reason} ${waitPhrase(headroom.retryAfterSeconds)}`
             : headroom.reason,
           retryAfterSeconds: headroom.retryAfterSeconds,
         },
@@ -212,7 +217,7 @@ export async function POST(request: Request): Promise<Response> {
         return Response.json(
           {
             error: 'quota',
-            message: `The model is over its request limit for the moment. Try again in about ${quota.retryAfterSeconds} seconds.`,
+            message: `The model is over its request limit for the moment. ${waitPhrase(quota.retryAfterSeconds)}`,
             retryAfterSeconds: quota.retryAfterSeconds,
           },
           { status: 429, headers: { 'retry-after': String(quota.retryAfterSeconds) } },
@@ -225,4 +230,13 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
   });
+}
+
+/** Seconds are the right unit for a minute and the wrong one for eleven hours. */
+function waitPhrase(seconds: number): string {
+  if (seconds < 120) return `Try again in about ${seconds} seconds.`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 90) return `Try again in about ${minutes} minutes.`;
+  const hours = Math.round(minutes / 60);
+  return `The next slot frees in about ${hours} ${hours === 1 ? 'hour' : 'hours'}.`;
 }

@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { env } from '@/lib/env';
-import { maxStepsFor, quotaCaps } from '@/lib/model/provider';
+import { maxStepsFor, questionsLeft, quotaCaps } from '@/lib/model/provider';
 import { callsLastMinute, callsToday } from '@/lib/chat/threads';
 import { ALL_SCOPES, REQUIRED_SCOPES, SCOPE_PURPOSE } from '@/lib/graph/scopes';
 import { formatRiyadh } from '@/lib/time';
@@ -118,8 +118,14 @@ export default async function SettingsPage() {
       tone: usage.ok ? undefined : 'bad',
     },
     {
-      label: 'Steps allowed per question',
-      value: String(maxStepsFor(caps)),
+      // The number that actually governs what you can do with this today.
+      label: 'Questions left today',
+      value: usage.ok ? `about ${questionsLeft(usage.chat, caps)}` : 'cannot read',
+      tone: usage.ok && questionsLeft(usage.chat, caps) === 0 ? 'bad' : undefined,
+    },
+    {
+      label: 'Requests a question can spend',
+      value: `up to ${maxStepsFor(caps)}`,
     },
   ];
 

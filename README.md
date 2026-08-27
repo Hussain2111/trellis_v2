@@ -72,6 +72,17 @@ Meta's own `follower_count` metric is **not** a running total and must never be
 subtracted end to end — see `docs/graph-api.md`. With only one reading there is
 no alert at all; a comparison never made is not "no change".
 
+## What the free tier allows
+
+`[VERIFIED-LIVE]` 2026-08-27, from the provider's console: **5 requests a
+minute, 20 a day.** A question is a tool loop costing up to four requests, so a
+day is **about four questions**. `/settings` shows how many are left rather than
+a request count, because that is the unit you think in.
+
+Both limits are environment variables, so a paid tier is a config change. See
+`docs/quota.md` for the arithmetic and for why raising the per-minute value
+costs you questions.
+
 ## The rules everything follows
 
 1. **A number that is not known renders blank, never zero.** Summing an empty

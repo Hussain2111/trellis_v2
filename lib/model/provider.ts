@@ -120,6 +120,13 @@ export interface QuotaLedger {
   callsToday(purpose: Purpose): Promise<number>;
   /** Calls spent in the last 60 seconds, across every purpose. */
   callsLastMinute(): Promise<number>;
+  /**
+   * When the oldest call still inside the 24-hour window was made, or null if
+   * there is none. The daily cap here is a ROLLING window, so this is when the
+   * first slot frees — which is a true statement about this app's own guard,
+   * unlike a guess at when the provider resets its counter.
+   */
+  oldestCallInWindow?(): Promise<Date | null>;
 }
 
 export interface Headroom {
@@ -129,6 +136,19 @@ export interface Headroom {
   reason?: string;
   /** Seconds until this is worth trying again. Only set for the per-minute limit. */
   retryAfterSeconds?: number;
+}
+
+/**
+ * Roughly how many more questions the day's budget allows.
+ *
+ * Deliberately conservative — it divides by the worst case, the full step
+ * ceiling, so the number never promises more than it can deliver. On a
+ * twenty-a-day tier this is the single most useful thing to know before typing,
+ * which is why it is on screen rather than discovered by being refused.
+ */
+export function questionsLeft(used: number, caps: QuotaCaps): number {
+  const available = Math.max(0, caps.dailyCalls - caps.reservedForCards - used);
+  return Math.floor(available / maxStepsFor(caps));
 }
 
 /**
@@ -184,14 +204,23 @@ export async function checkHeadroom(
   const spentOnCards = Math.min(cards, caps.reservedForCards);
   const availableToChat = limit - Math.max(0, cards - spentOnCards);
 
-  return used < availableToChat
-    ? { allowed: true, used, limit: availableToChat }
-    : {
-        allowed: false,
-        used,
-        limit: availableToChat,
-        reason: 'chat allowance is spent for today; the rest is reserved for insight cards',
-      };
+  if (used < availableToChat) return { allowed: true, used, limit: availableToChat };
+
+  // The daily cap is a rolling 24-hour window, so it frees gradually rather
+  // than all at once. Saying when the first slot comes back beats "come back
+  // tomorrow", which would be wrong by up to a day in either direction.
+  const oldest = await ledger.oldestCallInWindow?.();
+  const freesIn = oldest
+    ? Math.max(60, Math.ceil((oldest.getTime() + 86_400_000 - Date.now()) / 1000))
+    : undefined;
+
+  return {
+    allowed: false,
+    used,
+    limit: availableToChat,
+    reason: `Today's ${caps.dailyCalls} requests are spent, and the rest is held for the dashboard notes.`,
+    retryAfterSeconds: freesIn,
+  };
 }
 
 /** Caps as configured. Read from the environment so the plan can change without a deploy. */

@@ -56,8 +56,16 @@ export const envSchema = z.object({
    * Observed value and date live in docs/quota.md.
    */
   MODEL_CALLS_PER_MINUTE: z.coerce.number().int().min(1).default(5),
-  /** Provider requests allowed per day, across chat and card generation. */
-  MODEL_CALLS_PER_DAY: z.coerce.number().int().min(1).default(200),
+  /**
+   * Provider requests allowed per day, across chat and card generation.
+   *
+   * Twenty, observed. Not a self-imposed ceiling — this is the free tier's
+   * actual RPD for `gemini-3.6-flash`, and it is the binding constraint on the
+   * whole product: a question costs up to four requests, so a day is about five
+   * questions. The earlier default of 200 was invented before the number was
+   * known and would not have stopped anything.
+   */
+  MODEL_CALLS_PER_DAY: z.coerce.number().int().min(1).default(20),
 
   // --- Cron auth ------------------------------------------------------------
   // Sent as `Authorization: Bearer $CRON_SECRET` by Vercel's own cron caller

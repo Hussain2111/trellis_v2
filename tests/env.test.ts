@@ -34,7 +34,7 @@ describe('a variable set to nothing is a variable that is not set', () => {
 
   it('treats whitespace as blank too', () => {
     withEnv({ MODEL_CALLS_PER_DAY: '   ' }, () => {
-      expect(env().MODEL_CALLS_PER_DAY).toBe(200);
+      expect(env().MODEL_CALLS_PER_DAY).toBe(20);
     });
   });
 
