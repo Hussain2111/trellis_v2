@@ -212,6 +212,12 @@ blank with the reason.
 list, no follow or unfollow events, no webhook. The most this app can ever
 honestly say is that the total went down, and by how much.
 
+That is what the in-app follower alert says, and its wording is load-bearing: a
+NET change between two readings, over a stated pair of days, with "Instagram
+doesn't say who" on the face of it. A total that fell by nine could be nine
+departures, or twelve against three arrivals, and nothing available here can
+tell those apart.
+
 ## A trap that is not Meta's fault
 
 `lib/env.ts` reads `process.env` and nothing else. Vitest does not load `.env`,

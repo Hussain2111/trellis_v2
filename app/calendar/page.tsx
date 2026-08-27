@@ -2,7 +2,7 @@ import { selfAccountId } from '@/lib/chat/threads';
 import { listEntries } from '@/lib/calendar/entries';
 import { MonthCalendar, type Entry } from '@/components/month-calendar';
 import { EmptyState, Panel, PanelHeader } from '@/components/ui/primitives';
-import { formatRiyadh, riyadhDayKey, riyadhMonthKey, riyadhTimeOfDay } from '@/lib/time';
+import { riyadhDayKey, riyadhMonthKey, riyadhTimeOfDay } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,7 +23,6 @@ export default async function CalendarPage() {
 
   const now = new Date();
   const entries = await listEntries(accountId);
-  const overdue = entries.filter((e) => e.state === 'overdue');
 
   // Keyed to Riyadh days here, on the server, so the grid never has to know
   // what timezone the browser drawing it is in.
@@ -43,20 +42,6 @@ export default async function CalendarPage() {
   return (
     <main className="space-y-6">
       <Header />
-
-      {overdue.length > 0 ? (
-        <div className="rounded-xl border border-rule bg-accent-soft px-5 py-4">
-          <p className="text-sm font-medium">
-            {overdue.length} post{overdue.length === 1 ? '' : 's'} past their time
-          </p>
-          <p className="mt-1 text-sm text-ink-muted">
-            {overdue
-              .slice(0, 3)
-              .map((e) => e.title || e.hook || formatRiyadh(e.scheduledFor))
-              .join(' · ')}
-          </p>
-        </div>
-      ) : null}
 
       <MonthCalendar
         entries={forGrid}

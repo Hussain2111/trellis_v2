@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { CopyField } from './copy-field';
 import { CloseIcon, PlusIcon, TrashIcon } from './icons';
+import { forgetAlerts } from '@/lib/client/alerts';
 import { monthLabel, riyadhMonthMatrix, shiftMonth } from '@/lib/time';
 
 /**
@@ -176,6 +177,7 @@ export function MonthCalendar({
             day={overlay.day}
             onSaved={() => {
               setOverlay(null);
+              forgetAlerts();
               router.refresh();
             }}
           />
@@ -194,6 +196,7 @@ export function MonthCalendar({
             entry={open}
             onChanged={() => {
               setOverlay(null);
+              forgetAlerts();
               router.refresh();
             }}
           />

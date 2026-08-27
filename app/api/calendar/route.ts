@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { selfAccountId } from '@/lib/chat/threads';
-import { createEntry, listEntries, overdueCount } from '@/lib/calendar/entries';
+import { createEntry, listEntries } from '@/lib/calendar/entries';
 import { riyadhInstant } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
@@ -28,16 +28,12 @@ const entrySchema = z.object({
   notes: z.string().max(2000).optional(),
 });
 
-export async function GET(request: Request): Promise<Response> {
-  // The nav badge asks for a count, not a list. Serving it the full set of
-  // entries so it can throw all but one number away is the kind of waste that
-  // is invisible until it is on every page in the app.
-  const countOnly = new URL(request.url).searchParams.get('view') === 'overdue';
-
+export async function GET(): Promise<Response> {
+  // The overdue count moved to /api/alerts, which serves the banners and the
+  // nav badge from one request. Two endpoints answering the same question is
+  // two places for the answer to drift.
   const accountId = await selfAccountId();
-  if (!accountId) return Response.json(countOnly ? { overdue: 0 } : { entries: [] });
-
-  if (countOnly) return Response.json({ overdue: await overdueCount(accountId) });
+  if (!accountId) return Response.json({ entries: [] });
   return Response.json({ entries: await listEntries(accountId) });
 }
 

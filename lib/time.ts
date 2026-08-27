@@ -193,3 +193,16 @@ export function riyadhTimeOfDay(date: Date): string {
   const local = shift(date);
   return `${String(local.getUTCHours()).padStart(2, '0')}:${String(local.getUTCMinutes()).padStart(2, '0')}`;
 }
+
+/**
+ * The instants a Riyadh day begins and ends, as a half-open range.
+ *
+ * `[start, end)` so a query can ask "is this today" without a second opinion
+ * about whether midnight belongs to the day that ended or the one starting.
+ * Riyadh has no daylight saving, so the day is exactly 24 hours and this is the
+ * only place that gets to assume it.
+ */
+export function riyadhDayRange(date: Date): { start: Date; end: Date } {
+  const start = riyadhDayStart(date);
+  return { start, end: new Date(start.getTime() + 86_400_000) };
+}

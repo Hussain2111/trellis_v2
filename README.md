@@ -49,6 +49,29 @@ The full plan is in [`docs/plan.md`](docs/plan.md) — foundation, three surface
 lifecycles, a staged roadmap, and an open-questions register. The written record
 of the previous build is in [`docs/history/`](docs/history/README.md).
 
+## Alerts
+
+In-app only — no email, no push, no third-party service. A banner above every
+page, dismissible, plus a count on the calendar icon.
+
+| Alert                 | Fires when                                                                |
+| --------------------- | ------------------------------------------------------------------------- |
+| Followers fell / rose | The two most recent daily readings of the profile's follower total differ |
+| Post due today        | A planned entry is still ahead of you today, in Riyadh                    |
+| Post past its time    | A planned entry's time has gone                                           |
+
+The follower alert reports a **net** change and says so. Instagram publishes no
+follower list, no follow or unfollow events and no webhook for either, so there
+is no way to know who unfollowed, and no way to separate three arrivals and
+twelve departures from a bare loss of nine. Anything claiming otherwise is
+scraping or asking for the password.
+
+It also reads a column this app writes, not one Meta serves: the daily sync
+snapshots the profile's follower total into `account_daily.followers_total`.
+Meta's own `follower_count` metric is **not** a running total and must never be
+subtracted end to end — see `docs/graph-api.md`. With only one reading there is
+no alert at all; a comparison never made is not "no change".
+
 ## The rules everything follows
 
 1. **A number that is not known renders blank, never zero.** Summing an empty

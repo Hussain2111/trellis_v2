@@ -3,6 +3,7 @@
 import Link, { useLinkStatus } from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { loadAlerts } from '@/lib/client/alerts';
 import { CalendarIcon, ChatIcon, DashboardIcon, SettingsIcon } from './icons';
 
 /**
@@ -102,10 +103,9 @@ export function Nav() {
 }
 
 /**
- * Fetched after the shell is on screen rather than awaited before it.
- *
- * A count of overdue drafts is useful; it is not worth a database round trip in
- * front of every first paint, which is where it used to live.
+ * Fetched after the shell is on screen rather than awaited before it, and
+ * shared with the alert banners — the badge and the banners are two readings of
+ * one answer, so they are one request.
  */
 function useOverdueCount(): number {
   const [overdue, setOverdue] = useState(0);
@@ -113,12 +113,9 @@ function useOverdueCount(): number {
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/calendar?view=overdue')
-      .then((r) => (r.ok ? r.json() : { overdue: 0 }))
-      .then((body: { overdue?: number }) => {
-        if (!cancelled) setOverdue(body.overdue ?? 0);
-      })
-      .catch(() => {});
+    void loadAlerts(pathname).then((result) => {
+      if (!cancelled) setOverdue(result.overdue);
+    });
     return () => {
       cancelled = true;
     };
